@@ -11,9 +11,7 @@ pub struct CacheKey {
 
 #[derive(Clone)]
 pub struct DnsCaches {
-    // Guarda el wire-format completo de la respuesta (Message bytes)
     pub answers: Cache<CacheKey, Vec<u8>>,
-    // Guarda respuestas negativas wire-format (NXDOMAIN / NODATA)
     pub negative: Cache<CacheKey, Vec<u8>>,
     pub min_ttl: Duration,
     pub max_ttl: Duration,
@@ -22,17 +20,9 @@ pub struct DnsCaches {
 
 impl DnsCaches {
     pub fn new(cfg: &CacheConfig) -> Self {
-        let answers = Cache::builder()
-            .max_capacity(cfg.answer_cache_size)
-            .build();
-
-        let negative = Cache::builder()
-            .max_capacity(cfg.negative_cache_size)
-            .build();
-
         Self {
-            answers,
-            negative,
+            answers: Cache::builder().max_capacity(cfg.answer_cache_size).build(),
+            negative: Cache::builder().max_capacity(cfg.negative_cache_size).build(),
             min_ttl: Duration::from_secs(cfg.min_ttl),
             max_ttl: Duration::from_secs(cfg.max_ttl),
             negative_ttl: Duration::from_secs(cfg.negative_ttl),

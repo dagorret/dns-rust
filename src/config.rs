@@ -4,7 +4,13 @@ use serde::Deserialize;
 pub struct AppConfig {
     pub listen_udp: String,
     pub listen_tcp: String,
+
+    #[serde(default)]
+    pub upstreams: Option<Vec<String>>,
+
+    #[serde(default)]
     pub roots: Vec<String>,
+
     pub zones: ZonesConfig,
     pub filters: FiltersConfig,
     pub cache: CacheConfig,

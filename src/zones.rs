@@ -6,7 +6,6 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Clone)]
 pub struct ZoneStore {
-    // qname_lc -> list of records (absolute names)
     records: HashMap<String, Vec<Record>>,
 }
 
@@ -27,10 +26,9 @@ struct ZoneRecord {
 
 impl ZoneStore {
     pub fn load_dir(dir: &str) -> anyhow::Result<Self> {
-        let mut records: HashMap<String, Vec<Record>> = HashMap::new();
+        let mut records = HashMap::new();
         let path = Path::new(dir);
         if !path.exists() {
-            // si no existe, lo creamos vacío; el ejemplo viene en el zip.
             return Ok(Self { records });
         }
 
@@ -41,8 +39,7 @@ impl ZoneStore {
                 continue;
             }
             let s = fs::read_to_string(&p)?;
-            let z: ZoneFile = toml::from_str(&s)
-                .with_context(|| format!("parse zone file {:?}", p))?;
+            let z: ZoneFile = toml::from_str(&s).with_context(|| format!("parse zone file {:?}", p))?;
             Self::ingest_zone(&mut records, z)?;
         }
 
@@ -50,8 +47,7 @@ impl ZoneStore {
     }
 
     fn ingest_zone(dst: &mut HashMap<String, Vec<Record>>, z: ZoneFile) -> anyhow::Result<()> {
-        let origin = Name::from_ascii(&z.origin)
-            .with_context(|| format!("origin inválido: {}", z.origin))?;
+        let origin = Name::from_ascii(&z.origin).with_context(|| format!("origin inválido: {}", z.origin))?;
 
         for rr in z.records {
             let fqdn = Name::from_ascii(&rr.name)
@@ -76,12 +72,7 @@ impl ZoneStore {
     pub fn lookup(&self, qname: &Name, qtype: RecordType) -> Option<Vec<Record>> {
         let key = qname.to_ascii().trim_end_matches('.').to_ascii_lowercase();
         let recs = self.records.get(&key)?;
-        let mut out = Vec::new();
-        for r in recs {
-            if r.record_type() == qtype || qtype == RecordType::ANY {
-                out.push(r.clone());
-            }
-        }
+        let out: Vec<Record> = recs.iter().filter(|r| r.record_type() == qtype || qtype == RecordType::ANY).cloned().collect();
         if out.is_empty() { None } else { Some(out) }
     }
 }
@@ -92,46 +83,20 @@ fn parse_rrtype(s: &str) -> anyhow::Result<RecordType> {
         "AAAA" => RecordType::AAAA,
         "CNAME" => RecordType::CNAME,
         "TXT" => RecordType::TXT,
-        "MX" => RecordType::MX,
-        "NS" => RecordType::NS,
         other => anyhow::bail!("tipo no soportado en zona local: {other}"),
     })
 }
 
 fn parse_rdata(rt: RecordType, v: &str, origin: &Name) -> anyhow::Result<RData> {
     Ok(match rt {
-        RecordType::A => {
-            let ip: Ipv4Addr = v.parse()?;
-            RData::A(rdata::A(ip))
-        }
-        RecordType::AAAA => {
-            let ip: Ipv6Addr = v.parse()?;
-            RData::AAAA(rdata::AAAA(ip))
-        }
+        RecordType::A => RData::A(rdata::A(v.parse::<Ipv4Addr>()?)),
+        RecordType::AAAA => RData::AAAA(rdata::AAAA(v.parse::<Ipv6Addr>()?)),
         RecordType::CNAME => {
             let name = Name::from_ascii(v)
                 .or_else(|_| Name::from_ascii(format!("{}.{}", v.trim_end_matches('.'), origin).as_str()))?;
             RData::CNAME(rdata::CNAME(name))
         }
-        RecordType::TXT => {
-            RData::TXT(rdata::TXT::new(vec![v.to_string()]))
-        }
-        RecordType::MX => {
-            // "pref host"
-            let parts: Vec<&str> = v.split_whitespace().collect();
-            if parts.len() != 2 {
-                anyhow::bail!("MX value debe ser: '<pref> <host>'");
-            }
-            let pref: u16 = parts[0].parse()?;
-            let ex = Name::from_ascii(parts[1])
-                .or_else(|_| Name::from_ascii(format!("{}.{}", parts[1].trim_end_matches('.'), origin).as_str()))?;
-            RData::MX(rdata::MX::new(pref, ex))
-        }
-        RecordType::NS => {
-            let ns = Name::from_ascii(v)
-                .or_else(|_| Name::from_ascii(format!("{}.{}", v.trim_end_matches('.'), origin).as_str()))?;
-            RData::NS(rdata::NS(ns))
-        }
+        RecordType::TXT => RData::TXT(rdata::TXT::new(vec![v.to_string()])),
         _ => anyhow::bail!("RDATA no soportado para {rt:?}"),
     })
 }
