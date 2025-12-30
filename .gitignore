@@ -1,0 +1,29 @@
+# --- Rust / Cargo ---
+# Contiene los binarios compilados y artefactos (esta es la carpeta más pesada)
+/target/
+
+# Archivos de respaldo generados por rustfmt
+**/*.rs.bk
+
+# Archivos de depuración de MSVC (Windows)
+*.pdb
+
+# --- Cargo.lock ---
+# Regla general: 
+# - NO lo ignores si es un ejecutable (permite compilaciones reproducibles).
+# - PUEDES ignorarlo si es una librería (pero muchos prefieren incluirlo igualmente).
+# Cargo.lock
+
+# --- Editores e IDEs ---
+# VS Code
+.vscode/
+# IntelliJ / RustRover
+.idea/
+# Archivos temporales de Vim o Emacs
+*~
+*.swp
+
+# --- Sistema Operativo ---
+.DS_Store
+Thumbs.db
+

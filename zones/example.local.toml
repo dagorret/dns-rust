@@ -1,0 +1,43 @@
+# Zona local: overrides sencillos
+origin = "lab.local."
+ttl = 300
+
+# A/AAAA
+[[records]]
+name = "router.lab.local."
+type = "A"
+value = "192.0.2.1"
+
+[[records]]
+name = "host1.lab.local."
+type = "AAAA"
+value = "2001:db8::10"
+
+# CNAME
+[[records]]
+name = "www.lab.local."
+type = "CNAME"
+value = "host1.lab.local."
+
+# TXT
+[[records]]
+name = "info.lab.local."
+type = "TXT"
+value = "hola desde rust-dns-recursor"
+
+# MX
+[[records]]
+name = "lab.local."
+type = "MX"
+value = "10 mail.lab.local."
+
+# NS
+[[records]]
+name = "lab.local."
+type = "NS"
+value = "ns1.lab.local."
+
+[[records]]
+name = "ns1.lab.local."
+type = "A"
+value = "192.0.2.53"
