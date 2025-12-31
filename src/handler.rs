@@ -99,7 +99,7 @@ impl RequestHandler for DnsHandler {
         req: &Request,
         mut response: R,
     ) -> ResponseInfo {
-        let do_bit = req.edns().map(|e| e.dnssec_ok()).unwrap_or(false);
+        let do_bit = req.edns().map(|e| e.flags().contains(hickory_proto::op::EdnsFlags::DNSSEC_OK)).unwrap_or(false);
 
         let query = match req.queries().first() {
             Some(q) => q.clone(),
