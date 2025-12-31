@@ -8,7 +8,7 @@ use crate::{
 
 use hickory_proto::op::{MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::{Name, Record, RecordType};
-use hickory_proto::serialize::binary::{BinEncodable, BinEncoder};
+use hickory_proto::serialize::binary::{BinDecodable, BinEncodable, BinEncoder};
 
 use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
 use hickory_server::authority::MessageResponseBuilder;
