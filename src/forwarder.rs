@@ -1,12 +1,15 @@
 use anyhow::Context;
 use hickory_proto::xfer::Protocol;
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
+use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::config::{
     NameServerConfig, NameServerConfigGroup, ResolverConfig, ResolverOpts,
 };
+
 use std::net::SocketAddr;
 
-pub async fn build_forwarder(upstreams: &[String]) -> anyhow::Result<TokioAsyncResolver> {
+pub async fn build_forwarder(upstreams: &[String]) -> anyhow::Result<TokioResolver> {
+
     let mut group = NameServerConfigGroup::new();
 
     for u in upstreams {
@@ -36,10 +39,13 @@ pub async fn build_forwarder(upstreams: &[String]) -> anyhow::Result<TokioAsyncR
         cfg.add_name_server(ns);
     }
 
-    let mut opts = ResolverOpts::default();
-    opts.cache_size = 0;
+    let opts = ResolverOpts::default();
 
-    let resolver = TokioAsyncResolver::new(cfg, opts).await?;
+    let resolver = TokioResolver::builder_with_config(cfg, TokioConnectionProvider::default())
+        .with_options(opts)
+        .build();
+
     Ok(resolver)
 }
+
 

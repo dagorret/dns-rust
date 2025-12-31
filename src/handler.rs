@@ -6,18 +6,20 @@ use crate::{
     zones::ZoneStore,
 };
 
-use hickory_proto::op::{Message, MessageType, OpCode, ResponseCode};
+use hickory_proto::op::{MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::{Name, Record, RecordType};
 use hickory_proto::serialize::binary::{BinEncodable, BinEncoder};
 
 use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
+use hickory_server::authority::MessageResponseBuilder;
 
 use hickory_proto::ProtoErrorKind;
-use hickory_resolver::ResolveErrorKind;
+use hickory_resolver::{ResolveErrorKind, TokioResolver};
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use std::iter;
 
 #[derive(Clone)]
 pub struct DnsHandler {
@@ -25,7 +27,7 @@ pub struct DnsHandler {
     zones: Arc<ZoneStore>,
     filters: Arc<Filters>,
     caches: Arc<DnsCaches>,
-    forwarder: Option<hickory_resolver::TokioAsyncResolver>,
+    forwarder: Option<TokioResolver>,
     recursor: Option<Arc<RecursorEngine>>,
 }
 
@@ -35,7 +37,7 @@ impl DnsHandler {
         zones: ZoneStore,
         filters: Filters,
         caches: DnsCaches,
-        forwarder: Option<hickory_resolver::TokioAsyncResolver>,
+        forwarder: Option<TokioResolver>,
         recursor: Option<RecursorEngine>,
     ) -> Self {
         Self {
@@ -74,7 +76,7 @@ impl DnsHandler {
         }
     }
 
-    fn encode_message(msg: &Message) -> anyhow::Result<Vec<u8>> {
+    fn encode_message(msg: &hickory_proto::op::Message) -> anyhow::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(512);
         let mut enc = BinEncoder::new(&mut buf);
         msg.emit(&mut enc)?;
@@ -88,24 +90,6 @@ impl DnsHandler {
             .min()
             .map(Duration::from_secs)
     }
-
-    fn refused(req: &Request) -> Message {
-        let mut m = Message::new();
-        m.set_id(req.id());
-        m.set_message_type(MessageType::Response);
-        m.set_op_code(OpCode::Query);
-        m.set_response_code(ResponseCode::Refused);
-        m
-    }
-
-    fn servfail(req: &Request) -> Message {
-        let mut m = Message::new();
-        m.set_id(req.id());
-        m.set_message_type(MessageType::Response);
-        m.set_op_code(OpCode::Query);
-        m.set_response_code(ResponseCode::ServFail);
-        m
-    }
 }
 
 #[async_trait::async_trait]
@@ -115,83 +99,74 @@ impl RequestHandler for DnsHandler {
         req: &Request,
         mut response: R,
     ) -> ResponseInfo {
-        // Hickory server 0.25.x: Request expone queries()/edns()/header()
         let do_bit = req.edns().map(|e| e.dnssec_ok()).unwrap_or(false);
 
         let query = match req.queries().first() {
             Some(q) => q.clone(),
             None => {
-                let m = Self::servfail(req);
-                return match response.send_response(m).await {
-                    Ok(info) => info,
-                    Err(_) => ResponseInfo::from(*req.header()),
-                };
+                let msg = MessageResponseBuilder::from_message_request(req)
+                    .error_msg(req.header(), ResponseCode::ServFail);
+                return response.send_response(msg).await.unwrap_or_else(|_| {
+                    ResponseInfo::from(*req.header())
+                });
             }
         };
 
-        let qname = query.name().clone(); // (en Hickory suele ser LowerName)
+        let qname = query.name().clone();
         let qtype = query.query_type();
 
-        // 0) filtro por dominio
+        // 0) filtro
         if !self.filters.domain_allowed(&qname.to_ascii()) {
-            let m = Self::refused(req);
-            return match response.send_response(m).await {
-                Ok(info) => info,
-                Err(_) => ResponseInfo::from(*req.header()),
-            };
+            let msg = MessageResponseBuilder::from_message_request(req)
+                .error_msg(req.header(), ResponseCode::Refused);
+            return response.send_response(msg).await.unwrap_or_else(|_| {
+                ResponseInfo::from(*req.header())
+            });
         }
 
         // 1) zona local
         if let Some(recs) = self.zones.lookup(&qname, qtype) {
-            let mut m = Message::new();
-            m.set_id(req.id());
-            m.set_message_type(MessageType::Response);
-            m.set_op_code(OpCode::Query);
-            m.set_response_code(ResponseCode::NoError);
-            m.add_query(query.clone());
-            for r in recs {
-                m.add_answer(r);
-            }
+            let mut header = *req.header();
+            header.set_message_type(MessageType::Response);
+            header.set_op_code(OpCode::Query);
+            header.set_response_code(ResponseCode::NoError);
 
-            return match response.send_response(m).await {
-                Ok(info) => info,
-                Err(_) => ResponseInfo::from(*req.header()),
-            };
+            let msg = MessageResponseBuilder::from_message_request(req)
+                .build(header, recs.iter(), iter::empty(), iter::empty(), iter::empty());
+
+            return response.send_response(msg).await.unwrap_or_else(|_| {
+                ResponseInfo::from(*req.header())
+            });
         }
 
-        // 2) cache positivo
+        // 2 y 3) cache
         let key = Self::cache_key(&qname, qtype, do_bit);
-        if let Some(bytes) = self.caches.answers.get(&key).await {
-            if let Ok(mut cached) = Message::from_bytes(&bytes) {
-                cached.set_id(req.id());
-                cached.set_message_type(MessageType::Response);
-                return match response.send_response(cached).await {
-                    Ok(info) => info,
-                    Err(_) => ResponseInfo::from(*req.header()),
-                };
+
+        if let Some(bytes) = self.caches.answers.get(&key).await
+            .or_else(|| self.caches.negative.get(&key).await)
+        {
+            if let Ok(cached) = hickory_proto::op::Message::from_bytes(&bytes) {
+                let mut header = *req.header();
+                header.set_message_type(MessageType::Response);
+                header.set_op_code(OpCode::Query);
+                header.set_response_code(cached.response_code());
+
+                let msg = MessageResponseBuilder::from_message_request(req)
+                    .build(header, cached.answers().iter(), iter::empty(), iter::empty(), iter::empty());
+
+                return response.send_response(msg).await.unwrap_or_else(|_| {
+                    ResponseInfo::from(*req.header())
+                });
             }
         }
 
-        // 3) cache negativo
-        if let Some(bytes) = self.caches.negative.get(&key).await {
-            if let Ok(mut cached) = Message::from_bytes(&bytes) {
-                cached.set_id(req.id());
-                cached.set_message_type(MessageType::Response);
-                return match response.send_response(cached).await {
-                    Ok(info) => info,
-                    Err(_) => ResponseInfo::from(*req.header()),
-                };
-            }
-        }
-
-        // 4) resolver (forwarder o recursor)
-        let (records, rcode): (Vec<Record>, ResponseCode) = if let Some(fwd) = &self.forwarder {
+        // 4) resolver
+        let (records, rcode) = if let Some(fwd) = &self.forwarder {
             match fwd.lookup(qname.clone(), qtype).await {
-                Ok(lookup) => {
-                    // En 0.25.x, iter() suele dar RData; records() devuelve Record.
-                    let recs = lookup.records().iter().cloned().collect::<Vec<Record>>();
-                    (recs, ResponseCode::NoError)
-                }
+                Ok(lookup) => (
+                    lookup.records().iter().cloned().collect::<Vec<Record>>(),
+                    ResponseCode::NoError,
+                ),
                 Err(e) => match e.kind() {
                     ResolveErrorKind::Proto(pe) => match pe.kind() {
                         ProtoErrorKind::NoRecordsFound { response_code, .. } => {
@@ -203,10 +178,8 @@ impl RequestHandler for DnsHandler {
                 },
             }
         } else if let Some(rec) = &self.recursor {
-            // ✅ FIX: RecursorEngine::resolve espera Name, pero query.name() suele ser LowerName.
-            let qname_name: hickory_proto::rr::Name = qname.clone().into();
-
-            match rec.resolve(qname_name, qtype, do_bit).await {
+            let name: Name = qname.clone().into();
+            match rec.resolve(name, qtype, do_bit).await {
                 Ok(lookup) => (
                     lookup.iter().cloned().collect::<Vec<Record>>(),
                     ResponseCode::NoError,
@@ -217,51 +190,17 @@ impl RequestHandler for DnsHandler {
             (vec![], ResponseCode::ServFail)
         };
 
-        // Armar respuesta
-        let mut resp = Message::new();
-        resp.set_id(req.id());
-        resp.set_message_type(MessageType::Response);
-        resp.set_op_code(OpCode::Query);
-        resp.set_response_code(rcode);
-        resp.add_query(query.clone());
-        for r in &records {
-            resp.add_answer(r.clone());
-        }
+        let mut header = *req.header();
+        header.set_message_type(MessageType::Response);
+        header.set_op_code(OpCode::Query);
+        header.set_response_code(rcode);
 
-        // cache TTL
-        let is_negative = records.is_empty()
-            && (rcode == ResponseCode::NXDomain || rcode == ResponseCode::NoError);
+        let msg = MessageResponseBuilder::from_message_request(req)
+            .build(header, records.iter(), iter::empty(), iter::empty(), iter::empty());
 
-        let ttl = if !records.is_empty() {
-            Self::min_ttl_from_records(&records).unwrap_or(self.caches.min_ttl)
-        } else {
-            self.caches.negative_ttl
-        };
-        let ttl = self.caches.clamp_ttl(ttl);
-
-        if let Ok(bytes) = Self::encode_message(&resp) {
-            if is_negative {
-                self.caches.negative.insert(key.clone(), bytes).await;
-                let neg = self.caches.negative.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(ttl).await;
-                    neg.invalidate(&key).await;
-                });
-            } else if rcode == ResponseCode::NoError {
-                self.caches.answers.insert(key.clone(), bytes).await;
-                let ans = self.caches.answers.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(ttl).await;
-                    ans.invalidate(&key).await;
-                });
-            }
-        }
-
-        // send_response devuelve Result<ResponseInfo, io::Error> -> lo aplanamos
-        match response.send_response(resp).await {
-            Ok(info) => info,
-            Err(_) => ResponseInfo::from(*req.header()),
-        }
+        response.send_response(msg).await.unwrap_or_else(|_| {
+            ResponseInfo::from(*req.header())
+        })
     }
 }
 
