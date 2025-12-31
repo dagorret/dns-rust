@@ -181,7 +181,7 @@ impl RequestHandler for DnsHandler {
             let name: Name = qname.clone().into();
             match rec.resolve(name, qtype, do_bit).await {
                 Ok(lookup) => (
-                    lookup.iter().cloned().collect::<Vec<Record>>(),
+                    lookup.records().iter().cloned().collect::<Vec<Record>>(),
                     ResponseCode::NoError,
                 ),
                 Err(_) => (vec![], ResponseCode::ServFail),
