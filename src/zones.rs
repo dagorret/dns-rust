@@ -57,7 +57,7 @@ impl ZoneStore {
             let rtype = parse_rrtype(&rr.typ)?;
             let rdata = parse_rdata(rtype, &rr.value, &origin)?;
 
-            let rec = Record::from_rdata(name, ttl, rdata);
+            let rec = Record::from_rdata(rr_name.clone(), ttl, rdata);
 
             let key = fqdn.to_ascii().trim_end_matches('.').to_ascii_lowercase();
             dst.entry(key).or_default().push(rec);
