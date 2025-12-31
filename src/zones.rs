@@ -39,7 +39,8 @@ impl ZoneStore {
                 continue;
             }
             let s = fs::read_to_string(&p)?;
-            let z: ZoneFile = toml::from_str(&s).with_context(|| format!("parse zone file {:?}", p))?;
+            let z: ZoneFile =
+                toml::from_str(&s).with_context(|| format!("parse zone file {:?}", p))?;
             Self::ingest_zone(&mut records, z)?;
         }
 
@@ -47,19 +48,28 @@ impl ZoneStore {
     }
 
     fn ingest_zone(dst: &mut HashMap<String, Vec<Record>>, z: ZoneFile) -> anyhow::Result<()> {
-        let origin = Name::from_ascii(&z.origin).with_context(|| format!("origin inválido: {}", z.origin))?;
+        let origin =
+            Name::from_ascii(&z.origin).with_context(|| format!("origin inválido: {}", z.origin))?;
 
         for rr in z.records {
             let fqdn = Name::from_ascii(&rr.name)
-                .or_else(|_| Name::from_ascii(format!("{}.{}", rr.name.trim_end_matches('.'), origin).as_str()))
+                .or_else(|_| {
+                    Name::from_ascii(
+                        format!("{}.{}", rr.name.trim_end_matches('.'), origin).as_str(),
+                    )
+                })
                 .with_context(|| format!("nombre inválido: {}", rr.name))?;
 
             let rtype = parse_rrtype(&rr.typ)?;
             let rdata = parse_rdata(rtype, &rr.value, &origin)?;
 
-            let rec = Record::from_rdata(rr_name.clone(), ttl, rdata);
+            // ✅ Hickory 0.25.x: construir Record así (Record::new ya no existe)
+            let rec = Record::from_rdata(fqdn.clone(), z.ttl, rdata);
 
-            let key = fqdn.to_ascii().trim_end_matches('.').to_ascii_lowercase();
+            let key = fqdn
+                .to_ascii()
+                .trim_end_matches('.')
+                .to_ascii_lowercase();
             dst.entry(key).or_default().push(rec);
         }
         Ok(())
@@ -68,7 +78,11 @@ impl ZoneStore {
     pub fn lookup(&self, qname: &Name, qtype: RecordType) -> Option<Vec<Record>> {
         let key = qname.to_ascii().trim_end_matches('.').to_ascii_lowercase();
         let recs = self.records.get(&key)?;
-        let out: Vec<Record> = recs.iter().filter(|r| r.record_type() == qtype || qtype == RecordType::ANY).cloned().collect();
+        let out: Vec<Record> = recs
+            .iter()
+            .filter(|r| r.record_type() == qtype || qtype == RecordType::ANY)
+            .cloned()
+            .collect();
         if out.is_empty() { None } else { Some(out) }
     }
 }
@@ -89,10 +103,13 @@ fn parse_rdata(rt: RecordType, v: &str, origin: &Name) -> anyhow::Result<RData> 
         RecordType::AAAA => RData::AAAA(rdata::AAAA(v.parse::<Ipv6Addr>()?)),
         RecordType::CNAME => {
             let name = Name::from_ascii(v)
-                .or_else(|_| Name::from_ascii(format!("{}.{}", v.trim_end_matches('.'), origin).as_str()))?;
+                .or_else(|_| {
+                    Name::from_ascii(format!("{}.{}", v.trim_end_matches('.'), origin).as_str())
+                })?;
             RData::CNAME(rdata::CNAME(name))
         }
         RecordType::TXT => RData::TXT(rdata::TXT::new(vec![v.to_string()])),
         _ => anyhow::bail!("RDATA no soportado para {rt:?}"),
     })
 }
+
