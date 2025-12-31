@@ -57,11 +57,7 @@ impl ZoneStore {
             let rtype = parse_rrtype(&rr.typ)?;
             let rdata = parse_rdata(rtype, &rr.value, &origin)?;
 
-            let mut rec = Record::new();
-            rec.set_name(fqdn.clone());
-            rec.set_ttl(z.ttl);
-            rec.set_record_type(rtype);
-            rec.set_data(Some(rdata));
+            let rec = Record::from_rdata(name, ttl, rdata);
 
             let key = fqdn.to_ascii().trim_end_matches('.').to_ascii_lowercase();
             dst.entry(key).or_default().push(rec);

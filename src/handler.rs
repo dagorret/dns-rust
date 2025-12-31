@@ -10,16 +10,16 @@ use hickory_proto::op::{MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::{Name, Record, RecordType};
 use hickory_proto::serialize::binary::{BinDecodable, BinEncodable, BinEncoder};
 
-use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
 use hickory_server::authority::MessageResponseBuilder;
+use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
 
 use hickory_proto::ProtoErrorKind;
 use hickory_resolver::{ResolveErrorKind, TokioResolver};
 
+use std::iter;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::iter;
 
 #[derive(Clone)]
 pub struct DnsHandler {
@@ -99,16 +99,18 @@ impl RequestHandler for DnsHandler {
         req: &Request,
         mut response: R,
     ) -> ResponseInfo {
-        let do_bit = req.edns().map(|e| e.flags().contains(hickory_proto::op::EdnsFlags::DNSSEC_OK)).unwrap_or(false);
+        // ✅ DO bit desde flags (hickory 0.25.x)
+        let do_bit = req.edns().map(|e| e.flags().dnssec_ok()).unwrap_or(false);
 
         let query = match req.queries().first() {
             Some(q) => q.clone(),
             None => {
                 let msg = MessageResponseBuilder::from_message_request(req)
                     .error_msg(req.header(), ResponseCode::ServFail);
-                return response.send_response(msg).await.unwrap_or_else(|_| {
-                    ResponseInfo::from(*req.header())
-                });
+                return response
+                    .send_response(msg)
+                    .await
+                    .unwrap_or_else(|_| ResponseInfo::from(*req.header()));
             }
         };
 
@@ -119,9 +121,10 @@ impl RequestHandler for DnsHandler {
         if !self.filters.domain_allowed(&qname.to_ascii()) {
             let msg = MessageResponseBuilder::from_message_request(req)
                 .error_msg(req.header(), ResponseCode::Refused);
-            return response.send_response(msg).await.unwrap_or_else(|_| {
-                ResponseInfo::from(*req.header())
-            });
+            return response
+                .send_response(msg)
+                .await
+                .unwrap_or_else(|_| ResponseInfo::from(*req.header()));
         }
 
         // 1) zona local
@@ -134,29 +137,42 @@ impl RequestHandler for DnsHandler {
             let msg = MessageResponseBuilder::from_message_request(req)
                 .build(header, recs.iter(), iter::empty(), iter::empty(), iter::empty());
 
-            return response.send_response(msg).await.unwrap_or_else(|_| {
-                ResponseInfo::from(*req.header())
-            });
+            return response
+                .send_response(msg)
+                .await
+                .unwrap_or_else(|_| ResponseInfo::from(*req.header()));
         }
 
-        // 2 y 3) cache
+        // 2 y 3) cache (✅ sin or_else con await)
         let key = Self::cache_key(&qname, qtype, do_bit);
 
-        if let Some(bytes) = self.caches.answers.get(&key).await
-            .or_else(|| self.caches.negative.get(&key).await)
-        {
+        let cached_bytes = if let Some(bytes) = self.caches.answers.get(&key).await {
+            Some(bytes)
+        } else if let Some(bytes) = self.caches.negative.get(&key).await {
+            Some(bytes)
+        } else {
+            None
+        };
+
+        if let Some(bytes) = cached_bytes {
             if let Ok(cached) = hickory_proto::op::Message::from_bytes(&bytes) {
                 let mut header = *req.header();
                 header.set_message_type(MessageType::Response);
                 header.set_op_code(OpCode::Query);
                 header.set_response_code(cached.response_code());
 
-                let msg = MessageResponseBuilder::from_message_request(req)
-                    .build(header, cached.answers().iter(), iter::empty(), iter::empty(), iter::empty());
+                let msg = MessageResponseBuilder::from_message_request(req).build(
+                    header,
+                    cached.answers().iter(),
+                    iter::empty(),
+                    iter::empty(),
+                    iter::empty(),
+                );
 
-                return response.send_response(msg).await.unwrap_or_else(|_| {
-                    ResponseInfo::from(*req.header())
-                });
+                return response
+                    .send_response(msg)
+                    .await
+                    .unwrap_or_else(|_| ResponseInfo::from(*req.header()));
             }
         }
 
@@ -190,6 +206,7 @@ impl RequestHandler for DnsHandler {
             (vec![], ResponseCode::ServFail)
         };
 
+        // construir respuesta final
         let mut header = *req.header();
         header.set_message_type(MessageType::Response);
         header.set_op_code(OpCode::Query);
@@ -198,9 +215,10 @@ impl RequestHandler for DnsHandler {
         let msg = MessageResponseBuilder::from_message_request(req)
             .build(header, records.iter(), iter::empty(), iter::empty(), iter::empty());
 
-        response.send_response(msg).await.unwrap_or_else(|_| {
-            ResponseInfo::from(*req.header())
-        })
+        response
+            .send_response(msg)
+            .await
+            .unwrap_or_else(|_| ResponseInfo::from(*req.header()))
     }
 }
 

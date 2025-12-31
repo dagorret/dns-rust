@@ -35,9 +35,10 @@ pub async fn build_forwarder(upstreams: &[String]) -> anyhow::Result<TokioResolv
     }
 
     let mut cfg = ResolverConfig::new();
-    for ns in group.into_iter() {
+    for ns in group.iter().cloned() {
         cfg.add_name_server(ns);
     }
+
 
     let opts = ResolverOpts::default();
 

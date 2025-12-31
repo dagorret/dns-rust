@@ -5,11 +5,12 @@ use hickory_recursor::resolver::config::{NameServerConfig, NameServerConfigGroup
 use hickory_proto::xfer::Protocol;
 use ipnet::IpNet;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Clone)]
 pub struct RecursorEngine {
-    recursor: Recursor,
+    recursor: Arc<Recursor>,
     timeout: Duration,
     attempts: usize,
 }
@@ -47,8 +48,18 @@ impl RecursorEngine {
             .case_randomization(cfg.recursor.case_randomization);
 
         // nameserver filter (destinos)
-        let allow: Vec<IpNet> = cfg.filters.allow_nets.iter().filter_map(|s| s.parse().ok()).collect();
-        let deny: Vec<IpNet> = cfg.filters.deny_nets.iter().filter_map(|s| s.parse().ok()).collect();
+        let allow: Vec<IpNet> = cfg
+            .filters
+            .allow_nets
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        let deny: Vec<IpNet> = cfg
+            .filters
+            .deny_nets
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
         builder = builder.nameserver_filter(allow.iter(), deny.iter());
 
         // DNSSEC policy
@@ -57,7 +68,7 @@ impl RecursorEngine {
         let recursor = builder.build(root_group)?;
 
         Ok(Self {
-            recursor,
+            recursor: Arc::new(recursor),
             timeout: Duration::from_millis(cfg.recursor.timeout_ms),
             attempts: cfg.recursor.attempts.max(1),
         })
@@ -116,4 +127,3 @@ fn parse_dnssec_policy(s: &str) -> anyhow::Result<DnssecPolicy> {
         _ => anyhow::bail!("dnssec debe ser: off | process | validate"),
     }
 }
-
