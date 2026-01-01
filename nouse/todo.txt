@@ -77,3 +77,262 @@ Próximo paso (decime cuál querés)
 5️⃣ DNSSEC real (AD flag correcto)
 
 Decime el siguiente y lo hacemos con código concreto.
+
+
+
+---
+
+## 1️⃣ ¿Estamos construyendo un servidor DNS robusto?
+
+**Sí. Claramente sí.**
+
+Razones:
+- Soporta UDP y TCP
+- Tiene cache positiva y negativa
+- Maneja blocklists y filtros
+- Tiene forwarder y recursor completo
+- Tiene tests de integración reales por wire (`dig`)
+- Está escrito en Rust (seguridad + performance)
+
+👉 Esto **no es un toy project**.
+
+---
+
+## 2️⃣ ¿Es para qué tamaño de consultas?
+
+### Escala esperada (estimada)
+
+- **Forwarder**:
+  - Miles a decenas de miles de QPS
+  - Depende del upstream y red
+- **Recursor iterativo**:
+  - Menor QPS
+  - Optimizado para redes medianas
+  - Ideal para ISP pequeño / lab / edge / privacidad
+
+No es (aún) para:
+- Root-scale (millones de QPS)
+- Public resolver global tipo 8.8.8.8
+
+---
+
+## 3️⃣ ¿Es Full Recursivo?
+
+✅ **Sí**
+
+En modo recursor:
+- Arranca desde root servers
+- Sigue delegaciones
+- Llega a servidores autoritativos
+- Cachea NS y respuestas
+
+Es un **resolver iterativo completo**.
+
+---
+
+## 4️⃣ ¿Tiene Upstream?
+
+✅ **Sí**
+
+En modo forwarder:
+- Usa uno o varios upstreams
+- Puede implementar failover
+- Ideal para entornos restringidos
+
+Es **mutuamente excluyente** con el recursor:
+- Si hay `upstreams` → forwarder
+- Si no hay `upstreams` → recursor
+
+---
+
+## 5️⃣ ¿Qué tipo de cache tiene?
+
+Actualmente soporta:
+
+### ✅ Cache normal
+- Respeta TTL
+- Cache positiva y negativa
+
+### ✅ Cache agresiva (parcial)
+- TTL mínimo configurable
+- TTL máximo configurable
+- Negative cache configurable
+
+### 🟡 Cache personalizada (parcial)
+- Parámetros ajustables por config
+- No hay (aún):
+  - Prefetch
+  - Stale-while-revalidate
+  - Cache por RR-type diferenciado
+
+👉 **La base está lista** para cache avanzada.
+
+---
+
+## 🧭 Conclusión
+
+Estás construyendo un **resolver DNS serio**, modular y extensible, con:
+
+- Forwarder de alto rendimiento
+- Recursor iterativo real
+- Cache bien pensada
+- Tests sólidos
+- Diseño claro
+
+El siguiente nivel sería:
+- Prefetch
+- Stale answers
+- Métricas (Prometheus)
+- Rate limiting
+- DNSSEC (ya preparado)
+
+Cuando quieras, seguimos. 🚀
+
+
+-----------------------
+Prioridad 0: decidir arquitectura ISP
+Recomendación para ISP: 2 capas
+
+Capa edge (por PoP / ciudad): Forwarder hacia…
+
+Capa core: Recursor iterativo (2–6 instancias) con cache caliente
+
+Por qué: el recursor iterativo es más pesado. El forwarder “edge” absorbe QPS, y el core hace la recursión real con cache compartida por zona geográfica.
+
+Tu software puede cubrir ambos roles:
+
+Edge: upstreams = ["core1:53", "core2:53"]
+
+Core: roots = [...] (sin upstreams)
+
+Prioridad 1: cache “de ISP” (esto es la clave)
+
+Ahora mismo tenés cache normal y parámetros TTL. Para ISP, sumá:
+
+1) Prefetch (warm cache)
+
+Si un registro está “popular” y está por expirar, revalidalo antes de que expire.
+
+Reduce p95/p99
+
+Reduce “thundering herd”
+
+2) Serve-stale (stale-while-revalidate)
+
+Si un upstream / autoritativo está lento o caído:
+
+servís la respuesta expirada por un tiempo corto (ej 30–300s)
+
+en paralelo revalidás
+
+Esto es lo que hace que un resolver “no se caiga” cuando Internet se pone feo.
+
+3) Negative cache “correcta”
+
+Respetar SOA MINIMUM / TTL negativo cuando venga en autoridad
+
+No usar un valor fijo para todo (tu negative_ttl está bien como fallback)
+
+4) Cache por tipo / por zona / por política
+
+algunos RRTypes son más costosos o más consultados
+
+algunos dominios “ruidosos” requieren policy específica
+
+👉 Con esto, saltás de proyecto robusto a resolver de operador.
+
+Prioridad 2: concurrencia y control del “stampede”
+
+Problema clásico ISP:
+
+1000 clientes preguntan lo mismo cuando expira TTL → 1000 recursiones.
+
+Solución:
+
+single-flight per key: si google.com A está en vuelo, los demás esperan esa misma respuesta.
+
+Esto baja muchísimo la carga en picos.
+
+Prioridad 3: transporte, IO y performance
+1) UDP rápido + TCP correcto
+
+Ya lo tenés, bien.
+
+2) EDNS0 y tamaños
+
+Para ISP necesitás:
+
+EDNS0 buffer size bien (1232 recomendado para evitar fragmentación)
+
+cortar respuestas grandes y caer a TCP cuando corresponda
+
+3) Ajuste de sockets / runtime
+
+múltiples workers
+
+tuning de UDP recv buffer
+
+reuseport (si aplica)
+
+limitar CPU por request costoso
+
+Prioridad 4: resiliencia operativa
+1) Multi-upstream con health-check real
+
+No solo “fallback si timeout”, sino:
+
+mark unhealthy
+
+backoff
+
+jitter
+
+retry controlado
+
+2) Circuit-breakers
+
+Si un root/TLD/autoritativo está mal:
+
+no pegues 1000 veces por segundo igual
+
+Prioridad 5: seguridad “ISP”
+
+Antes que DNSSEC, yo haría:
+
+1) Anti-amplificación
+
+no responder ANY
+
+limitar respuestas enormes
+
+rate-limit por IP / subnet
+
+2) RRL (Response Rate Limiting)
+
+básico pero efectivo
+
+3) QNAME minimization
+
+privacidad y reduce exposición
+
+Prioridad 6: observabilidad (obligatorio ISP)
+
+Sin esto, no operás.
+
+Métricas mínimas:
+
+QPS total / por tipo
+
+hit rate cache positiva/negativa
+
+latencia p50/p95/p99
+
+upstream timeouts / SERVFAIL
+
+top NXDOMAIN
+
+top dominios
+
+concurrent in-flight
+
+Logs con sampling, no todo.
