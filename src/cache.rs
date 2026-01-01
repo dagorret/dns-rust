@@ -1,6 +1,6 @@
 use crate::config::CacheConfig;
 use moka::future::Cache;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct CacheKey {
@@ -10,43 +10,55 @@ pub struct CacheKey {
 }
 
 #[derive(Clone)]
+pub struct CachedEntry {
+    pub bytes: Vec<u8>,
+    pub expires_at: Instant,
+    pub stale_until: Instant,
+}
+
+#[derive(Clone)]
 pub struct DnsCaches {
-    pub answers: Cache<CacheKey, Vec<u8>>,
-    pub negative: Cache<CacheKey, Vec<u8>>,
-
-    // Marca de 1er NXDOMAIN visto (para cache negativo de 2 hits)
-    pub negative_probe: Cache<CacheKey, u8>,
-
-    // Opción B: hoy puede no usarse desde lib/bin, pero lo queremos mantener (TTL policy)
-    #[allow(dead_code)]
-    pub min_ttl: Duration,
-
-    #[allow(dead_code)]
-    pub max_ttl: Duration,
-
-    #[allow(dead_code)]
-    pub negative_ttl: Duration,
+    pub answers: Cache<CacheKey, CachedEntry>,
+    pub negative: Cache<CacheKey, CachedEntry>,
+    pub cfg: CacheConfig,
 }
 
 impl DnsCaches {
-    pub fn new(cfg: &CacheConfig) -> Self {
+    pub fn new(cfg: CacheConfig) -> Self {
         Self {
-            answers: Cache::builder().max_capacity(cfg.answer_cache_size).build(),
-            negative: Cache::builder().max_capacity(cfg.negative_cache_size).build(),
-            negative_probe: Cache::builder()
-                .max_capacity(cfg.negative_cache_size)
-                .time_to_live(Duration::from_secs(60))
+            answers: Cache::builder()
+                .max_capacity(cfg.answer_cache_size)
                 .build(),
-            min_ttl: Duration::from_secs(cfg.min_ttl),
-            max_ttl: Duration::from_secs(cfg.max_ttl),
-            negative_ttl: Duration::from_secs(cfg.negative_ttl),
+            negative: Cache::builder()
+                .max_capacity(cfg.negative_cache_size)
+                .build(),
+            cfg,
         }
     }
 
-    // Opción B: puede no estar usado todavía, pero lo vamos a usar en caching TTL/clamping
-    #[allow(dead_code)]
-    pub fn clamp_ttl(&self, ttl: Duration) -> Duration {
-        ttl.clamp(self.min_ttl, self.max_ttl)
+    pub fn classify(&self, entry: &CachedEntry) -> CacheState {
+        let now = Instant::now();
+
+        if now < entry.expires_at {
+            let remaining = entry.expires_at - now;
+            if remaining <= Duration::from_secs(self.cfg.prefetch_threshold_secs) {
+                CacheState::NearExpiry
+            } else {
+                CacheState::Fresh
+            }
+        } else if now < entry.stale_until {
+            CacheState::Stale
+        } else {
+            CacheState::Dead
+        }
     }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CacheState {
+    Fresh,
+    NearExpiry,
+    Stale,
+    Dead,
 }
 
