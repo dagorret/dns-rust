@@ -1,0 +1,36 @@
+# tests/fixtures/up_test.toml (ejemplo)
+listen_udp = "127.0.0.1:0"
+listen_tcp = "127.0.0.1:0"
+
+# Modo FORWARDER
+upstreams = ["1.1.1.1:53"]   # o el upstream que uses
+
+[zones]
+zones_dir = "zones"
+
+[filters]
+allowlist_domains = []
+blocklist_domains = ["ads.example", "tracking.example"]
+deny_nets = [
+  "127.0.0.0/8",
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "::1/128",
+  "fc00::/7",
+  "::/0"
+]
+allow_nets = []
+
+[cache]
+answer_cache_size = 20000
+negative_cache_size = 5000
+min_ttl = 5
+max_ttl = 86400
+negative_ttl = 300
+
+[recursor]
+timeout_ms = 1500
+attempts = 2
+dnssec = "off"
+

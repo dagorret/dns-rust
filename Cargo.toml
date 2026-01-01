@@ -29,5 +29,5 @@ hickory-recursor = "0.25.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net"] }
-hickory-client = "0.25.2"
-tempfile = 3
+tempfile = "3"
+assert_cmd = "2"
