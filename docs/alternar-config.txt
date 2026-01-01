@@ -1,0 +1,10 @@
+La forma correcta es forzar el archivo con -c/--config.
+
+Forzar forwarder (upstreams)
+cargo run -- -c config/up.toml
+
+Forzar recursor iterativo (roots)
+cargo run -- -c config/rec.toml
+
+
+(Para tests, igual: cargo test ... -- --nocapture no usa cargo run; pero cuando ejecutás el binario, sí conviene pasar siempre -c.)

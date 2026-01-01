@@ -1,0 +1,57 @@
+# config/example.toml
+# Modo recursivo (sin upstreams): usa recursor (roots + hickory-recursor).
+
+listen_udp = "0.0.0.0:5353"
+listen_tcp = "0.0.0.0:5353"
+
+# En modo recursivo no seteamos upstreams.
+# upstreams = ["1.1.1.1:53", "8.8.8.8:53"]
+
+# Root hints / roots (archivos o IPs, según cómo lo uses en recursor_engine.rs)
+roots = []
+
+[zones]
+# path = "zones.db"
+
+[filters]
+allowlist_domains = []
+blocklist_domains = []
+deny_nets = []
+allow_nets = []
+
+[cache]
+answer_cache_size = 20000
+negative_cache_size = 5000
+
+min_ttl = 5
+max_ttl = 86400
+
+# Fallback TTL negativo (si no hay SOA útil)
+negative_ttl = 300
+
+# NUEVO: cache negativo moderno (NXDOMAIN + NODATA)
+[cache.negative]
+enabled = true
+cache_nxdomain = true
+cache_nodata = true
+
+# 2-hit: probe corto y recién cachear al segundo golpe
+two_hit = true
+probe_ttl_secs = 60
+
+# clamp TTL negativo
+min_ttl = 5
+max_ttl = 300
+
+[recursor]
+ns_cache_size = 2048
+record_cache_size = 8192
+recursion_limit = 12
+ns_recursion_limit = 6
+timeout_ms = 2000
+attempts = 2
+case_randomization = true
+
+# "disabled" | "validate" (según tu implementación actual)
+dnssec = "disabled"
+

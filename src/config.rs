@@ -17,8 +17,14 @@ pub struct AppConfig {
     pub recursor: RecursorConfig,
 }
 
+fn default_zones_dir() -> String {
+    "zones".to_string()
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ZonesConfig {
+    /// Directorio de zones. Se acepta también la clave histórica `path` (alias).
+    #[serde(default = "default_zones_dir", alias = "path")]
     pub zones_dir: String,
 }
 
@@ -34,13 +40,58 @@ pub struct FiltersConfig {
     pub allow_nets: Vec<String>,
 }
 
+fn d_true() -> bool { true }
+fn d_two_hit() -> bool { true }
+fn d_probe_ttl() -> u64 { 60 }
+fn d_neg_min() -> u64 { 5 }
+fn d_neg_max() -> u64 { 300 }
+
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct CacheConfig {
     pub answer_cache_size: u64,
     pub negative_cache_size: u64,
+
+    /// TTL positivo: límites (clamp). "Moderno" = nunca cache infinito, pero tampoco TTL ridículamente bajo.
     pub min_ttl: u64,
     pub max_ttl: u64,
+
+    /// TTL negativo fallback (si no se puede inferir del SOA del upstream).
     pub negative_ttl: u64,
+
+    /// Cache negativo "estilo Unbound" (NXDOMAIN / NODATA) con política anti-ruido.
+    #[serde(default)]
+    pub negative: NegativeCacheConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[allow(dead_code)]
+pub struct NegativeCacheConfig {
+    /// Habilita cache negativo en general.
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+
+    /// Cachear NXDOMAIN (dominio inexistente).
+    #[serde(default = "d_true")]
+    pub cache_nxdomain: bool,
+
+    /// Cachear NODATA (NOERROR pero sin answers para ese qtype).
+    #[serde(default = "d_true")]
+    pub cache_nodata: bool,
+
+    /// Política 2-hit: 1er hit = probe corto, 2do hit = se cachea. Reduce ruido/typos/DGA.
+    #[serde(default = "d_two_hit")]
+    pub two_hit: bool,
+
+    /// TTL del "probe" (solo aplica si two_hit = true).
+    #[serde(default = "d_probe_ttl")]
+    pub probe_ttl_secs: u64,
+
+    /// Clamp del TTL negativo (evita caches negativos eternos).
+    #[serde(default = "d_neg_min")]
+    pub min_ttl: u64,
+    #[serde(default = "d_neg_max")]
+    pub max_ttl: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

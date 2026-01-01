@@ -1,36 +1,47 @@
-# tests/fixtures/up_test.toml (ejemplo)
-listen_udp = "127.0.0.1:0"
-listen_tcp = "127.0.0.1:0"
+# config/up.toml
+# Modo forwarder (consulta a upstreams).
 
-# Modo FORWARDER
-upstreams = ["1.1.1.1:53"]   # o el upstream que uses
+listen_udp = "0.0.0.0:1053"
+listen_tcp = "0.0.0.0:1053"
+
+upstreams = ["1.1.1.1:53", "8.8.8.8:53"]
+
+roots = []
 
 [zones]
-zones_dir = "zones"
+# path = "zones.db"
 
 [filters]
 allowlist_domains = []
-blocklist_domains = ["ads.example", "tracking.example"]
-deny_nets = [
-  "127.0.0.0/8",
-  "10.0.0.0/8",
-  "172.16.0.0/12",
-  "192.168.0.0/16",
-  "::1/128",
-  "fc00::/7",
-  "::/0"
-]
+blocklist_domains = []
+deny_nets = []
 allow_nets = []
 
 [cache]
 answer_cache_size = 20000
 negative_cache_size = 5000
+
 min_ttl = 5
 max_ttl = 86400
 negative_ttl = 300
 
+[cache.negative]
+enabled = true
+cache_nxdomain = true
+cache_nodata = true
+two_hit = true
+probe_ttl_secs = 60
+min_ttl = 5
+max_ttl = 300
+
 [recursor]
-timeout_ms = 1500
+# Aunque uses upstreams, mantenemos este bloque para no romper el config loader.
+ns_cache_size = 2048
+record_cache_size = 8192
+recursion_limit = 12
+ns_recursion_limit = 6
+timeout_ms = 2000
 attempts = 2
-dnssec = "off"
+case_randomization = true
+dnssec = "disabled"
 
