@@ -1,0 +1,79 @@
+Paso 1️⃣: marcar RA = 1
+
+Esto es obligatorio si sos recursor.
+
+En handler.rs, después de copiar el header:
+
+header.set_recursion_available(true);
+
+
+Eso elimina:
+
+WARNING: recursion requested but not available
+
+Paso 2️⃣: agregar glue solo cuando corresponde
+
+Lógica simple (suficiente para LAN):
+
+Si qtype == MX:
+
+para cada MX:
+
+buscá A y AAAA
+
+agregalos a ADDITIONAL si los tenés
+
+Si qtype == NS:
+
+igual, glue de NS
+
+No hace falta hacerlo para A/AAAA.
+
+Paso 3️⃣: dónde hacerlo
+
+Justo antes de construir el MessageResponseBuilder:
+
+let additional = Vec<Record>;
+
+
+y luego:
+
+.build(header, answers, authority, additional, iter::empty())
+
+7️⃣ Nivel “LAN production-ready” (lo que ya lograste)
+
+Con lo que tenés ahora + estos ajustes:
+
+✔️ A / AAAA
+✔️ MX
+✔️ TXT
+✔️ Recursión real
+✔️ Cache
+✔️ IPv4-only transport
+✔️ Zonas locales
+✔️ Filtros
+✔️ Glue básico
+
+Eso es más que suficiente para:
+
+redes LAN
+
+servidores internos
+
+mail servers
+
+proxies
+
+Kubernetes
+
+homelab serio
+
+Próximo paso (decime cuál querés)
+
+1️⃣ Implementar glue MX/NS
+2️⃣ Ajustar RA / AA / AD flags correctamente
+3️⃣ Servir SOA y NXDOMAIN “bien”
+4️⃣ Hacer que funcione como resolver upstream de otros DNS
+5️⃣ DNSSEC real (AD flag correcto)
+
+Decime el siguiente y lo hacemos con código concreto.

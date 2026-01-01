@@ -1,8 +1,8 @@
-listen_udp = "0.0.0.0:5353"
-listen_tcp = "0.0.0.0:5353"
+listen_udp = "0.0.0.0:1053"
+listen_tcp = "0.0.0.0:1053"
 
 # Si está presente -> modo FORWARDER (ideal para redes restringidas)
-upstreams = ["200.7.141.6:53", "200.7.141.7:53"]
+#upstreams = ["1.1.1.1", "192.168.88.2"]
 
 # Si upstreams NO está -> modo RECURSOR ITERATIVO
 roots = [
@@ -28,7 +28,17 @@ zones_dir = "zones"
 allowlist_domains = []
 blocklist_domains = ["ads.example", "tracking.example"]
 
-deny_nets = ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fc00::/7"]
+deny_nets = [
+  "127.0.0.0/8",
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "::1/128",
+  "fc00::/7",
+
+  # ✅ IPv4-only transport: no consultes nameservers por IPv6
+  "::/0"
+]
 allow_nets = []
 
 [cache]
