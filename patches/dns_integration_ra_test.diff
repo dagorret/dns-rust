@@ -1,0 +1,52 @@
+diff --git a/tests/dns_integration.rs b/tests/dns_integration.rs
+--- a/tests/dns_integration.rs
++++ b/tests/dns_integration.rs
+@@
+ fn dig_status(output: &str) -> Option<String> {
+@@
+ }
+
++fn dig_has_ra(output: &str) -> bool {
++    // dig prints something like:
++    // ;; flags: qr rd ra; QUERY: 1, ANSWER: ...
++    // We just look for " ra" in the flags line.
++    output.lines().any(|l| l.contains("flags:") && l.contains(" ra"))
++}
++
+@@
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+ async fn forwarder_a_noerror() -> anyhow::Result<()> {
+@@
+ }
+
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn forwarder_sets_ra_flag() -> anyhow::Result<()> {
++    let tmp = TempDir::new()?;
++    let cfg_path = write_test_config_forwarder(&tmp)?;
++    let ((udp_addr, _), _) = start_server_from_cfg(&cfg_path).await?;
++
++    let out = dig_udp_fast(udp_addr, "example.com.", "A")?;
++    assert_eq!(dig_status(&out).as_deref(), Some("NOERROR"));
++    assert!(dig_has_ra(&out), "expected RA flag in dig output:\\n{out}");
++    Ok(())
++}
++
+@@
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+ #[ignore]
+ async fn recursor_iterative_resolves_a() -> anyhow::Result<()> {
+@@
+ }
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++#[ignore]
++async fn recursor_sets_ra_flag() -> anyhow::Result<()> {
++    let tmp = TempDir::new()?;
++    let cfg_path = write_test_config_recursor(&tmp)?;
++    let ((udp_addr, _), _) = start_server_from_cfg(&cfg_path).await?;
++
++    let out = dig_udp_slow(udp_addr, "example.com.", "A")?;
++    assert_eq!(dig_status(&out).as_deref(), Some("NOERROR"));
++    assert!(dig_has_ra(&out), "expected RA flag in dig output:\\n{out}");
++    Ok(())
++}

@@ -1,0 +1,24 @@
+diff --git a/src/handler.rs b/src/handler.rs
+--- a/src/handler.rs
++++ b/src/handler.rs
+@@
+-    // existing code that builds the response message...
++    // existing code that builds the response message...
++
++    // -----------------------------
++    // RA flag (Recursion Available)
++    // -----------------------------
++    //
++    // RD (Recursion Desired) is requested by the client; we typically copy it.
++    // RA is advertised by the server: "I can do recursion."
++    //
++    // Consider both modes as recursion-capable for the client:
++    // - iterative recursor: self.recursor.is_some()
++    // - forwarder: self.forwarder.is_some()
++    //
++    // If you want RA only for iterative recursor, remove the forwarder part.
++    let recursion_available = self.recursor.is_some() || self.forwarder.is_some();
++    response_header.set_recursion_available(recursion_available);
++
++    // Recommended: copy RD from request if not already done.
++    response_header.set_recursion_desired(request_header.recursion_desired());

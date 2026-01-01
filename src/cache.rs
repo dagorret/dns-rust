@@ -14,6 +14,9 @@ pub struct DnsCaches {
     pub answers: Cache<CacheKey, Vec<u8>>,
     pub negative: Cache<CacheKey, Vec<u8>>,
 
+    // Marca de 1er NXDOMAIN visto (para cache negativo de 2 hits)
+    pub negative_probe: Cache<CacheKey, u8>,
+
     // Opción B: hoy puede no usarse desde lib/bin, pero lo queremos mantener (TTL policy)
     #[allow(dead_code)]
     pub min_ttl: Duration,
@@ -30,6 +33,10 @@ impl DnsCaches {
         Self {
             answers: Cache::builder().max_capacity(cfg.answer_cache_size).build(),
             negative: Cache::builder().max_capacity(cfg.negative_cache_size).build(),
+            negative_probe: Cache::builder()
+                .max_capacity(cfg.negative_cache_size)
+                .time_to_live(Duration::from_secs(60))
+                .build(),
             min_ttl: Duration::from_secs(cfg.min_ttl),
             max_ttl: Duration::from_secs(cfg.max_ttl),
             negative_ttl: Duration::from_secs(cfg.negative_ttl),

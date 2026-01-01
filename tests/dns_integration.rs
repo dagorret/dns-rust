@@ -257,11 +257,17 @@ fn dig_answer_count(output: &str) -> usize {
     output.lines().filter(|l| l.contains("\tIN\t")).count()
 }
 
+fn dig_has_ra(output: &str) -> bool {
+    // dig prints: ;; flags: qr rd ra; QUERY: 1, ANSWER: ...
+    output.lines().any(|l| l.contains("flags:") && l.contains(" ra"))
+}
+
 fn median_duration(mut xs: Vec<Duration>) -> Duration {
     xs.sort_unstable();
     xs[xs.len() / 2]
 }
 
+#[allow(dead_code)]
 async fn measure_query_times_udp_fast(
     server: SocketAddr,
     name: &str,
@@ -320,6 +326,19 @@ async fn forwarder_a_noerror() -> anyhow::Result<()> {
     assert!(dig_answer_count(&out) > 0);
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forwarder_sets_ra_flag() -> anyhow::Result<()> {
+    let tmp = TempDir::new()?;
+    let cfg_path = write_test_config_forwarder(&tmp)?;
+    let ((udp_addr, _), _) = start_server_from_cfg(&cfg_path).await?;
+
+    let out = dig_udp_fast(udp_addr, "example.com.", "A")?;
+    assert_eq!(dig_status(&out).as_deref(), Some("NOERROR"));
+    assert!(dig_has_ra(&out), "expected RA flag in dig output:\n{out}");
+    Ok(())
+}
+
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn forwarder_blocklist_refused() -> anyhow::Result<()> {
@@ -472,6 +491,20 @@ async fn recursor_iterative_resolves_a() -> anyhow::Result<()> {
     assert!(dig_answer_count(&out) > 0);
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn recursor_sets_ra_flag() -> anyhow::Result<()> {
+    let tmp = TempDir::new()?;
+    let cfg_path = write_test_config_recursor(&tmp)?;
+    let ((udp_addr, _), _) = start_server_from_cfg(&cfg_path).await?;
+
+    let out = dig_udp_slow(udp_addr, "example.com.", "A")?;
+    assert_eq!(dig_status(&out).as_deref(), Some("NOERROR"));
+    assert!(dig_has_ra(&out), "expected RA flag in dig output:\n{out}");
+    Ok(())
+}
+
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
