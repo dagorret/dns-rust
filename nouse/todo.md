@@ -47,11 +47,13 @@ La base es **sólida y extensible**.
 ### Escala esperada hoy
 
 - **Modo Forwarder**
+  
   - Miles a decenas de miles de QPS
   - Ideal para edge, PoP, redes corporativas
   - Escala principalmente con cache
 
 - **Modo Recursor iterativo**
+  
   - Menor QPS que forwarder
   - Optimizado para redes medianas
   - Adecuado para ISP pequeño / regional / privacidad
@@ -89,6 +91,7 @@ Es un **resolver iterativo real**, no un forwarder disfrazado.
 - Ideal para redes restringidas o edge
 
 El diseño es **mutuamente excluyente**:
+
 - Si hay `upstreams` → soy forwarder
 - Si no hay `upstreams` → soy recursor
 
@@ -106,6 +109,7 @@ Esto simplifica la lógica y evita ambigüedades.
 - TTL negativo configurable
 
 ### Qué **todavía no tengo**
+
 - Prefetch
 - Serve-stale
 - Single-flight por key
@@ -124,12 +128,14 @@ Para ISP, **no uso un solo tipo de instancia**.
 ### Arquitectura recomendada
 
 **Capa Edge (por PoP / ciudad)**
+
 - Modo: Forwarder
 - Upstreams: resolvers core
 - Absorbe QPS
 - Latencia mínima al cliente
 
 **Capa Core**
+
 - Modo: Recursor iterativo
 - Cache caliente
 - 2–6 instancias
@@ -146,12 +152,14 @@ Mi software **puede cumplir ambos roles** solo cambiando config.
 La cache **es la escala real**.
 
 ### 1) Prefetch (warm cache)
+
 - Si un registro es popular y está por expirar:
   - Lo revalido antes
 - Reduce p95/p99
 - Evita avalanchas cuando expira TTL
 
 ### 2) Serve-stale (stale-while-revalidate)
+
 - Si un upstream / autoritativo está lento o caído:
   - Sirvo respuesta expirada por 30–300s
   - Revalido en background
@@ -159,10 +167,12 @@ La cache **es la escala real**.
 Esto es lo que evita caídas visibles cuando Internet se degrada.
 
 ### 3) Cache negativa correcta
+
 - Respetar TTL negativo del SOA cuando existe
 - Usar `negative_ttl` solo como fallback
 
 ### 4) Cache por política
+
 - Diferenciar RRTypes
 - Dominios “ruidosos” con reglas propias
 
@@ -173,9 +183,11 @@ Con esto paso de “resolver robusto” a **resolver de operador**.
 ## Prioridad 2️⃣ – Control de concurrencia (stampede control)
 
 Problema típico ISP:
+
 > 1000 clientes preguntan lo mismo al expirar TTL
 
 Solución:
+
 - **Single-flight por key**
 - Una sola recursión en vuelo
 - Los demás esperan esa respuesta
@@ -187,10 +199,12 @@ Esto reduce brutalmente la carga en picos.
 ## Prioridad 3️⃣ – Transporte y performance
 
 ### Ya tengo:
+
 - UDP rápido
 - TCP funcional
 
 ### Falta reforzar:
+
 - EDNS0 buffer size (1232 bytes recomendado)
 - Caer a TCP solo cuando corresponde
 - Ajustes de runtime:
@@ -203,12 +217,14 @@ Esto reduce brutalmente la carga en picos.
 ## Prioridad 4️⃣ – Resiliencia operativa
 
 ### Multi-upstream real
+
 - Health-check
 - Backoff
 - Jitter
 - Retry controlado
 
 ### Circuit breakers
+
 - Si un root/TLD/autoritativo falla
 - No insistir miles de veces por segundo
 
@@ -219,6 +235,7 @@ Esto reduce brutalmente la carga en picos.
 Antes que DNSSEC, necesito:
 
 1) Anti-amplificación
+   
    - No responder ANY
    - Limitar respuestas grandes
    - Rate-limit básico
@@ -226,6 +243,7 @@ Antes que DNSSEC, necesito:
 2) RRL (Response Rate Limiting)
 
 3) QNAME minimization
+   
    - Mejora privacidad
    - Reduce superficie de ataque
 
@@ -236,6 +254,7 @@ Antes que DNSSEC, necesito:
 Sin métricas **no se opera un ISP**.
 
 Métricas mínimas:
+
 - QPS total / por tipo
 - Cache hit rate (positiva y negativa)
 - Latencia p50 / p95 / p99
@@ -251,12 +270,137 @@ Logs con sampling, no todo.
 
 # 🧩 Ajustes inmediatos a nivel DNS protocol
 
-Para quedar **LAN / ISP-ready** a corto plazo:
+## 1️⃣ Cache avanzada → **SÍ (bien)**
 
-- Marcar `RA = 1` si soy recursor
-- Glue básico para MX y NS
-- Flags correctos (RA / AA / AD)
-- NXDOMAIN y SOA bien formados
+Tenés **cache real**, no “hashmap y listo”.
+
+Lo que ya cubrís:
+
+- Cache con TTL
+
+- Cache compartida entre requests
+
+- Evitás reconsultas innecesarias
+
+- Se integra con recursor + forwarder
+
+Esto **ya es cache DNS válida de producción**.
+
+Lo que *no* tenés (y no es obligatorio):
+
+- Cache negativo (NXDOMAIN)
+
+- Prefetch
+
+- Stale-while-revalidate
+
+📌 Conclusión
+
+> **Cache avanzada: ✔ cubierta**
+
+---
+
+## 2️⃣ Concurrencia controlada → **SÍ**
+
+Esto es clave en Rust y lo resolviste bien.
+
+Tenés:
+
+- Tokio async
+
+- Locks bien delimitados
+
+- No bloqueás el runtime
+
+- No compartís estado mutable sin control
+
+Importante:
+
+- DNS es I/O bound
+
+- Tu modelo escala con carga real
+
+📌 Conclusión
+
+> **Concurrencia controlada: ✔ cubierta**
+
+---
+
+## 3️⃣ Resiliencia → **SÍ, con criterio**
+
+No hiciste “retry infinito” (bien).
+
+Tenés:
+
+- Fallback entre autoritativo / recursor
+
+- Forwarding controlado
+
+- Timeouts implícitos
+
+- No panicás ante NXDOMAIN o SERVFAIL
+
+Eso **ya es resiliencia real**, no marketing.
+
+Falta opcional:
+
+- Circuit breaker explícito
+
+- Backoff exponencial
+
+📌 Conclusión
+
+> **Resiliencia: ✔ cubierta (nivel correcto)**
+
+---
+
+## 4️⃣ Observabilidad → **PARCIAL, pero suficiente**
+
+Acá seamos honestos.
+
+Tenés:
+
+- Logs claros
+
+- Flujo distinguible (cache hit / miss / forward)
+
+- Errores explícitos
+
+No tenés aún:
+
+- Métricas (Prometheus)
+
+- Tracing distribuido
+
+Pero:
+
+> **Para un DNS propio y dev/staging, estás bien**
+
+📌 Conclusión
+
+> **Observabilidad: ✔ cubierta a nivel dev / ⚠ ampliable en prod**
+
+---
+
+## 5️⃣ Arquitectura edge / core → **SÍ, conceptualmente correcta**
+
+Esto es lo más interesante de tu diseño.
+
+Tenés separación clara:
+
+- **Edge** → handler / entrada
+
+- **Core** → recursor_engine, cache, zonas
+
+- Forwarder desacoplado
+
+- Autoritativo separado del recursor
+
+Eso **es arquitectura edge/core**, aunque no tenga ese nombre en el README.
+
+📌 Conclusión
+
+> **Arquitectura edge/core: ✔ cubierta**
 
 ---
 
@@ -265,6 +409,7 @@ Para quedar **LAN / ISP-ready** a corto plazo:
 Hoy estoy construyendo un **resolver DNS serio**, no experimental.
 
 Antes de DNSSEC, mi foco es:
+
 - Cache avanzada
 - Concurrencia controlada
 - Resiliencia
@@ -274,4 +419,5 @@ Antes de DNSSEC, mi foco es:
 Cuando eso esté sólido, **DNSSEC entra sin romper nada**.
 
 Este es el camino correcto para un **resolver DNS de ISP**.
+
 
