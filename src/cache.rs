@@ -13,8 +13,15 @@ pub struct CacheKey {
 pub struct DnsCaches {
     pub answers: Cache<CacheKey, Vec<u8>>,
     pub negative: Cache<CacheKey, Vec<u8>>,
+
+    // Opción B: hoy puede no usarse desde lib/bin, pero lo queremos mantener (TTL policy)
+    #[allow(dead_code)]
     pub min_ttl: Duration,
+
+    #[allow(dead_code)]
     pub max_ttl: Duration,
+
+    #[allow(dead_code)]
     pub negative_ttl: Duration,
 }
 
@@ -29,7 +36,10 @@ impl DnsCaches {
         }
     }
 
+    // Opción B: puede no estar usado todavía, pero lo vamos a usar en caching TTL/clamping
+    #[allow(dead_code)]
     pub fn clamp_ttl(&self, ttl: Duration) -> Duration {
         ttl.clamp(self.min_ttl, self.max_ttl)
     }
 }
+

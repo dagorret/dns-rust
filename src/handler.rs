@@ -76,6 +76,8 @@ impl DnsHandler {
         }
     }
 
+    // Opción B: esto hoy no se usa, pero lo queremos conservar (para cache TTL, debug, etc.)
+    #[allow(dead_code)]
     fn encode_message(msg: &hickory_proto::op::Message) -> anyhow::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(512);
         let mut enc = BinEncoder::new(&mut buf);
@@ -83,6 +85,8 @@ impl DnsHandler {
         Ok(buf)
     }
 
+    // Opción B: idem
+    #[allow(dead_code)]
     fn min_ttl_from_records(records: &[Record]) -> Option<Duration> {
         records
             .iter()
@@ -99,7 +103,7 @@ impl RequestHandler for DnsHandler {
         req: &Request,
         mut response: R,
     ) -> ResponseInfo {
-        // ✅ DO bit desde flags (hickory 0.25.x)
+        // DO bit desde flags (hickory 0.25.x)
         let do_bit = req.edns().map(|e| e.flags().dnssec_ok).unwrap_or(false);
 
         let query = match req.queries().first() {
@@ -143,7 +147,7 @@ impl RequestHandler for DnsHandler {
                 .unwrap_or_else(|_| ResponseInfo::from(*req.header()));
         }
 
-        // 2 y 3) cache (✅ sin or_else con await)
+        // 2 y 3) cache (sin or_else con await)
         let key = Self::cache_key(&qname, qtype, do_bit);
 
         let cached_bytes = if let Some(bytes) = self.caches.answers.get(&key).await {
