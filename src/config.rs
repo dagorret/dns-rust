@@ -17,14 +17,9 @@ pub struct AppConfig {
     pub recursor: RecursorConfig,
 }
 
-fn default_zones_dir() -> String {
-    "zones".to_string()
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct ZonesConfig {
-    /// Directorio de zones. Se acepta también la clave histórica `path` (alias).
-    #[serde(default = "default_zones_dir", alias = "path")]
+    #[serde(default)]
     pub zones_dir: String,
 }
 
@@ -40,24 +35,47 @@ pub struct FiltersConfig {
     pub allow_nets: Vec<String>,
 }
 
-fn d_true() -> bool { true }
-fn d_two_hit() -> bool { true }
-fn d_probe_ttl() -> u64 { 60 }
-fn d_neg_min() -> u64 { 5 }
-fn d_neg_max() -> u64 { 300 }
+fn d_true() -> bool {
+    true
+}
+fn d_two_hit() -> bool {
+    true
+}
+fn d_probe_ttl() -> u64 {
+    60
+}
+fn d_neg_min() -> u64 {
+    5
+}
+fn d_neg_max() -> u64 {
+    300
+}
+fn d_prefetch() -> u64 {
+    10
+}
+fn d_stale_window() -> u64 {
+    30
+}
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub struct CacheConfig {
     pub answer_cache_size: u64,
     pub negative_cache_size: u64,
 
-    /// TTL positivo: límites (clamp). "Moderno" = nunca cache infinito, pero tampoco TTL ridículamente bajo.
+    /// TTL positivo: límites (clamp).
     pub min_ttl: u64,
     pub max_ttl: u64,
 
     /// TTL negativo fallback (si no se puede inferir del SOA del upstream).
     pub negative_ttl: u64,
+
+    /// Prefetch: umbral en segundos para disparar refresh antes de expirar.
+    #[serde(default = "d_prefetch")]
+    pub prefetch_threshold_secs: u64,
+
+    /// Stale-While-Revalidate: ventana de tolerancia (segundos) para servir stale y revalidar.
+    #[serde(default = "d_stale_window")]
+    pub stale_window_secs: u64,
 
     /// Cache negativo "estilo Unbound" (NXDOMAIN / NODATA) con política anti-ruido.
     #[serde(default)]
@@ -65,7 +83,6 @@ pub struct CacheConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-#[allow(dead_code)]
 pub struct NegativeCacheConfig {
     /// Habilita cache negativo en general.
     #[serde(default = "d_true")]
@@ -77,9 +94,10 @@ pub struct NegativeCacheConfig {
 
     /// Cachear NODATA (NOERROR pero sin answers para ese qtype).
     #[serde(default = "d_true")]
+    #[allow(dead_code)]
     pub cache_nodata: bool,
 
-    /// Política 2-hit: 1er hit = probe corto, 2do hit = se cachea. Reduce ruido/typos/DGA.
+    /// Política 2-hit: 1er hit = probe corto, 2do hit = se cachea.
     #[serde(default = "d_two_hit")]
     pub two_hit: bool,
 
@@ -87,7 +105,7 @@ pub struct NegativeCacheConfig {
     #[serde(default = "d_probe_ttl")]
     pub probe_ttl_secs: u64,
 
-    /// Clamp del TTL negativo (evita caches negativos eternos).
+    /// Clamp del TTL negativo.
     #[serde(default = "d_neg_min")]
     pub min_ttl: u64,
     #[serde(default = "d_neg_max")]

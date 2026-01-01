@@ -97,8 +97,6 @@ impl DnsHandler {
         header.set_authoritative(false);
     }
 
-    // Opción B: conservar por compat/debug (serialización)
-    #[allow(dead_code)]
     fn encode_message(msg: &Message) -> anyhow::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(512);
         let mut enc = BinEncoder::new(&mut buf);
@@ -106,36 +104,11 @@ impl DnsHandler {
         Ok(buf)
     }
 
-    #[allow(dead_code)]
-    fn min_ttl_from_records(records: &[Record]) -> Option<Duration> {
-        records
-            .iter()
-            .map(|r| r.ttl() as u64)
-            .min()
-            .map(Duration::from_secs)
-    }
-
-    fn build_msg_from_records(records: &[Record], rcode: ResponseCode, req_id: u16, rd: bool) -> anyhow::Result<Vec<u8>> {
-        let mut m = Message::new();
-        m.set_id(req_id);
-        m.set_message_type(MessageType::Response);
-        m.set_op_code(OpCode::Query);
-        m.set_response_code(rcode);
-        m.set_recursion_desired(rd);
-        m.set_recursion_available(true);
-        m.set_authentic_data(false);
-
-        for r in records {
-            m.add_answer(r.clone());
-        }
-
-        let mut buf = Vec::with_capacity(512);
-        let mut enc = BinEncoder::new(&mut buf);
-        m.emit(&mut enc)?;
-        Ok(buf)
-    }
-
-    async fn send_cached_bytes<R: ResponseHandler>(req: &Request, mut response: R, bytes: &[u8]) -> Option<ResponseInfo> {
+    async fn send_cached_bytes<R: ResponseHandler>(
+        req: &Request,
+        response: &mut R,
+        bytes: &[u8],
+    ) -> Option<ResponseInfo> {
         let cached = Message::from_bytes(bytes).ok()?;
         let mut header = *req.header();
         Self::set_common_flags(req, &mut header, cached.response_code());
@@ -214,29 +187,23 @@ impl DnsHandler {
 
         // Conservador: refrescamos sólo positivos con answers.
         if rcode == ResponseCode::NoError && !records.is_empty() {
-            // bytes sin authority/additional (suficiente para estos tests / dig básico)
-            let bytes = {
-                let ttl_secs = records.iter().map(|r| r.ttl() as u64).min().unwrap_or(30);
-                let ttl = caches.clamp_ttl(Duration::from_secs(ttl_secs));
-                let msg_bytes = {
-                    let mut m = Message::new();
-                    m.set_message_type(MessageType::Response);
-                    m.set_op_code(OpCode::Query);
-                    m.set_response_code(rcode);
-                    m.set_recursion_available(true);
-                    m.set_authentic_data(false);
-                    for r in &records {
-                        m.add_answer(r.clone());
-                    }
-                    let mut buf = Vec::with_capacity(512);
-                    let mut enc = BinEncoder::new(&mut buf);
-                    m.emit(&mut enc)?;
-                    buf
-                };
-                let entry = CachedEntry::new(msg_bytes, ttl, caches.stale_window());
-                caches.answers.insert(key, entry).await;
-            };
-            let _ = bytes;
+            let mut m = Message::new();
+            m.set_message_type(MessageType::Response);
+            m.set_op_code(OpCode::Query);
+            m.set_response_code(rcode);
+            m.set_recursion_available(true);
+            m.set_authentic_data(false);
+
+            for r in &records {
+                m.add_answer(r.clone());
+            }
+
+            let bytes = Self::encode_message(&m)?;
+
+            let ttl_secs = records.iter().map(|r| r.ttl() as u64).min().unwrap_or(30);
+            let ttl = caches.clamp_ttl(Duration::from_secs(ttl_secs));
+            let entry = CachedEntry::new(bytes, ttl, caches.stale_window());
+            caches.answers.insert(key, entry).await;
         }
 
         Ok(())
@@ -245,7 +212,11 @@ impl DnsHandler {
 
 #[async_trait::async_trait]
 impl RequestHandler for DnsHandler {
-    async fn handle_request<R: ResponseHandler>(&self, req: &Request, mut response: R) -> ResponseInfo {
+    async fn handle_request<R: ResponseHandler>(
+        &self,
+        req: &Request,
+        mut response: R,
+    ) -> ResponseInfo {
         // DO bit desde flags (hickory 0.25.x)
         let do_bit = req.edns().map(|e| e.flags().dnssec_ok).unwrap_or(false);
 
@@ -294,21 +265,21 @@ impl RequestHandler for DnsHandler {
         if let Some(entry) = self.caches.answers.get(&key).await {
             match self.caches.classify(&entry) {
                 CacheState::Fresh => {
-                    if let Some(info) = Self::send_cached_bytes(req, response, &entry.bytes).await {
+                    if let Some(info) = Self::send_cached_bytes(req, &mut response, &entry.bytes).await {
                         return info;
                     }
                     // Si falla el decode, caemos a resolver normal.
                 }
 
                 CacheState::NearExpiry | CacheState::Stale => {
-                    let info = Self::send_cached_bytes(req, response, &entry.bytes).await;
+                    let info = Self::send_cached_bytes(req, &mut response, &entry.bytes).await;
 
                     // Revalidación en background (prefetch / SWR)
                     let caches = self.caches.clone();
                     let forwarder = self.forwarder.clone();
                     let recursor = self.recursor.clone();
                     let key2 = key.clone();
-                    let qname2 = qname.clone();
+                    let qname2: Name = qname.clone().into();
 
                     spawn(async move {
                         let _ = DnsHandler::refresh_answer_cache(
@@ -335,9 +306,9 @@ impl RequestHandler for DnsHandler {
             }
         }
 
-        // 3) cache negativo existente (bytes)
-        if let Some(bytes) = self.caches.negative.get(&key).await {
-            if let Some(info) = Self::send_cached_bytes(req, response, &bytes).await {
+        // 3) cache negativo existente
+        if let Some(entry) = self.caches.negative.get(&key).await {
+            if let Some(info) = Self::send_cached_bytes(req, &mut response, &entry.bytes).await {
                 return info;
             }
         }
@@ -401,23 +372,41 @@ impl RequestHandler for DnsHandler {
             .build(header, records.iter(), iter::empty(), iter::empty(), iter::empty());
 
         // --- write-through cache (positivo y negativo) ---
-        // Guardamos un hickory_proto::op::Message serializado (no MessageResponse),
-        // porque el cache-hit reconstruye la respuesta a partir de ese Message.
-        if let Ok(bytes) = Self::build_msg_from_records(&records, rcode, req.id(), req.recursion_desired()) {
+        if let Ok(bytes) = {
+            let mut m = Message::new();
+            m.set_id(req.id());
+            m.set_message_type(MessageType::Response);
+            m.set_op_code(OpCode::Query);
+            m.set_response_code(rcode);
+            m.set_recursion_desired(req.recursion_desired());
+            m.set_recursion_available(true);
+            m.set_authentic_data(false);
+
+            for r in &records {
+                m.add_answer(r.clone());
+            }
+            Self::encode_message(&m)
+        } {
             if rcode == ResponseCode::NoError && !records.is_empty() {
                 let ttl_secs = records.iter().map(|r| r.ttl() as u64).min().unwrap_or(30);
                 let ttl = self.caches.clamp_ttl(Duration::from_secs(ttl_secs));
                 let entry = CachedEntry::new(bytes.clone(), ttl, self.caches.stale_window());
                 self.caches.answers.insert(key.clone(), entry).await;
-            } else if rcode == ResponseCode::NXDomain {
-                // Cache negativo con política "2 hits":
-                // 1er NXDOMAIN: marcamos probe. 2do NXDOMAIN: recién cacheamos.
-                if self.caches.negative.get(&key).await.is_none() {
-                    if self.caches.negative_probe.get(&key).await.is_some() {
-                        self.caches.negative.insert(key.clone(), bytes.clone()).await;
-                    } else {
-                        self.caches.negative_probe.insert(key.clone(), 1).await;
+            } else if rcode == ResponseCode::NXDomain && self.caches.negative_cfg.enabled && self.caches.negative_cfg.cache_nxdomain {
+                if self.caches.negative_cfg.two_hit {
+                    if self.caches.negative.get(&key).await.is_none() {
+                        if self.caches.negative_probe.get(&key).await.is_some() {
+                            let ttl = self.caches.clamp_negative_ttl(self.caches.negative_ttl);
+                            let entry = CachedEntry::new(bytes.clone(), ttl, self.caches.stale_window());
+                            self.caches.negative.insert(key.clone(), entry).await;
+                        } else {
+                            self.caches.negative_probe.insert(key.clone(), 1).await;
+                        }
                     }
+                } else {
+                    let ttl = self.caches.clamp_negative_ttl(self.caches.negative_ttl);
+                    let entry = CachedEntry::new(bytes.clone(), ttl, self.caches.stale_window());
+                    self.caches.negative.insert(key.clone(), entry).await;
                 }
             }
         }
