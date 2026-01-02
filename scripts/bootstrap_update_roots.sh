@@ -35,7 +35,6 @@ WITH_DNSSEC=0
 TRUST_KEY=""
 RESOLVERS=()
 
-# parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config) CFG_FILE="$2"; shift 2;;
@@ -51,7 +50,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Normalizar rutas relativas al repo si no son absolutas
 if [[ "${CFG_FILE}" != /* ]]; then CFG_FILE="${ROOT_DIR}/${CFG_FILE}"; fi
 if [[ "${OUT_DIR}" != /* ]]; then OUT_DIR="${ROOT_DIR}/${OUT_DIR}"; fi
 if [[ "${BOOTSTRAP_BIN}" != /* ]]; then BOOTSTRAP_BIN="${ROOT_DIR}/${BOOTSTRAP_BIN}"; fi
@@ -75,10 +73,8 @@ fi
 
 mkdir -p "${OUT_DIR}"
 
-# 1) Root hints oficiales
 "${BOOTSTRAP_BIN}" fetch-roots --out "${OUT_DIR}/root.hints"
 
-# 2) Extraer IPs (archivo temporario de trabajo)
 TMP_ROOTS_TOML="${OUT_DIR}/.roots.tmp.toml"
 "${BOOTSTRAP_BIN}" extract-root-ips \
   --input "${OUT_DIR}/root.hints" \
@@ -90,13 +86,11 @@ if [[ -z "${ROOTS_LINE}" ]]; then
   exit 1
 fi
 
-# 3) Reemplazar/Agregar roots en el TOML target SIN tocar el resto
 python3 - <<PY
-import re, pathlib, sys
+import re, pathlib
 
 cfg_path = pathlib.Path(r"${CFG_FILE}")
 txt = cfg_path.read_text(encoding="utf-8")
-
 roots_line = r'''${ROOTS_LINE}'''.strip()
 
 block = re.compile(r'(?ms)^roots\\s*=\\s*\\[.*?\\]\\s*$', re.MULTILINE)
@@ -125,7 +119,6 @@ PY
 
 rm -f "${TMP_ROOTS_TOML}"
 
-# 4) DNSSEC trust anchor (opcional)
 if [[ "${WITH_DNSSEC}" -eq 1 ]]; then
   if [[ ${#RESOLVERS[@]} -eq 0 ]]; then
     RESOLVERS=("1.1.1.1:53" "8.8.8.8:53")
@@ -146,3 +139,4 @@ echo " - actualizado: ${CFG_FILE} (roots=...)"
 if [[ "${WITH_DNSSEC}" -eq 1 ]]; then
   echo " - ${TRUST_KEY}"
 fi
+

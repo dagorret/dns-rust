@@ -202,4 +202,80 @@ Por lo tanto:
 - ✔ trust anchor generado
 
 - ❌ DNSSEC todavía no activo en runtime
+# Bootstrap de Roots y DNSSEC (rust-dns-recursor)
+
+Este documento describe **qué se implementó** y **cómo se obtienen / actualizan**
+automáticamente:
+
+- Root hints (servidores raíz DNS)
+- Trust Anchor DNSSEC (`DNSKEY .`)
+
+Todo el proceso es **no interactivo**, **idempotente** y reproducible.
+
+## Objetivo
+
+Evitar roots hardcodeados a mano y actualizaciones manuales, garantizando:
+
+- Roots oficiales desde IANA/InterNIC (`named.root`)
+- Trust anchor DNSSEC disponible (`DNSKEY .`)
+- Automatización (CI/cron/systemd)
+
+## Binario: `recursor-bootstrap`
+
+Ubicación:
+
+- `src/bin/recursor-bootstrap.rs`
+
+Build:
+
+```bash
+cargo build --release --bin recursor-bootstrap
+
+Comandos:
+
+`./target/release/recursor-bootstrap fetch-roots \   --out etc/dnsrust/root.hints`
+
+Extraer IPs:
+
+`./target/release/recursor-bootstrap extract-root-ips \   --input etc/dnsrust/root.hints \   --out-toml etc/dnsrust/roots.auto.toml`
+
+## Actualización automática del TOML real del recursor
+
+Script:
+
+- `scripts/bootstrap_update_roots.sh`
+
+Actualiza/inserta **solo** el bloque `roots = [...]` dentro de:
+
+- `config/recursor.toml` (por defecto)
+
+- o cualquier otro con `--config`
+
+Ejemplos:
+
+`./scripts/bootstrap_update_roots.sh ./scripts/bootstrap_update_roots.sh --config config/mi.toml`
+
+## DNSSEC trust anchor
+
+Genera `trusted-key.key` consultando `DNSKEY .`.
+
+Manual:
+
+`./target/release/recursor-bootstrap make-trust-anchor \   --out etc/dnsrust/trusted-key.key \   --resolver 1.1.1.1:53 \   --resolver 8.8.8.8:53`
+
+Integrado:
+
+`./scripts/bootstrap_update_roots.sh --with-dnssec`
+
+## Estado actual
+
+En `config/recursor.toml`:
+
+`[recursor] dnssec = "off"`
+
+Entonces:
+
+- ✅ roots actualizados automáticamente
+
+- ✅ trust anchor generado
 

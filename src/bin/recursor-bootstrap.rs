@@ -19,14 +19,16 @@
 //!   tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 //!   reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
 //!   quick-xml = "0.31"
-//!   hickory-resolver = "0.24"
-//!   hickory-proto = "0.24"
+//!   hickory-resolver = "0.25.2"
+//!   hickory-proto = "0.25.2"
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use hickory_proto::rr::{Name, RecordType};
 use hickory_proto::xfer::Protocol;
-use hickory_resolver::config::{NameServerConfig, NameServerConfigGroup, ResolverConfig, ResolverOpts};
+use hickory_resolver::config::{
+    NameServerConfig, NameServerConfigGroup, ResolverConfig, ResolverOpts,
+};
 use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::TokioResolver;
 use quick_xml::events::Event;
@@ -42,7 +44,11 @@ const IANA_ROOT_ANCHORS_INDEX_URL: &str = "https://data.iana.org/root-anchors/";
 const IANA_ROOT_ANCHORS_XML_URL: &str = "https://data.iana.org/root-anchors/root-anchors.xml";
 
 #[derive(Parser, Debug)]
-#[command(name = "recursor-bootstrap", version, about = "Bootstrap roots + DNSSEC trust anchor for a Hickory-based recursor")]
+#[command(
+    name = "recursor-bootstrap",
+    version,
+    about = "Bootstrap roots + DNSSEC trust anchor for a Hickory-based recursor"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -100,11 +106,16 @@ async fn main() -> Result<()> {
     match cli.cmd {
         Cmd::FetchRoots { out, url } => fetch_roots(&url, &out).await,
         Cmd::ExtractRootIps { input, out_toml } => extract_root_ips(&input, out_toml.as_deref()),
-        Cmd::MakeTrustAnchor { out, resolvers, inspect_iana_xml } => {
+        Cmd::MakeTrustAnchor {
+            out,
+            resolvers,
+            inspect_iana_xml,
+        } => {
             if inspect_iana_xml {
-                // Best-effort; some environments/proxies may block directory hosting.
                 if let Err(e) = inspect_root_anchors_xml().await {
-                    eprintln!("WARN: no pude inspeccionar root-anchors.xml ({e:#}). Fuente: {IANA_ROOT_ANCHORS_INDEX_URL}");
+                    eprintln!(
+                        "WARN: no pude inspeccionar root-anchors.xml ({e:#}). Fuente: {IANA_ROOT_ANCHORS_INDEX_URL}"
+                    );
                 }
             }
             make_trusted_key(&out, &resolvers).await
@@ -135,12 +146,10 @@ async fn fetch_roots(url: &str, out: &Path) -> Result<()> {
 }
 
 fn extract_root_ips(input: &Path, out_toml: Option<&Path>) -> Result<()> {
-    let txt = fs::read_to_string(input)
-        .with_context(|| format!("leyendo {}", input.display()))?;
+    let txt = fs::read_to_string(input).with_context(|| format!("leyendo {}", input.display()))?;
 
-    // Parse very conservatively:
-    // Look for lines with: "<name> <ttl> A <ipv4>" or "<name> <ttl> AAAA <ipv6>"
-    // (root hints file is a zone file format)
+    // Parse conservatively for:
+    // "<name> <ttl> A <ipv4>" or "<name> <ttl> AAAA <ipv6>"
     let mut ips: Vec<IpAddr> = Vec::new();
 
     for line in txt.lines() {
@@ -148,7 +157,6 @@ fn extract_root_ips(input: &Path, out_toml: Option<&Path>) -> Result<()> {
         if line.is_empty() || line.starts_with(';') {
             continue;
         }
-        // Remove trailing comments
         let line = line.split(';').next().unwrap_or("").trim();
 
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -201,7 +209,6 @@ async fn make_trusted_key(out: &Path, resolvers: &[String]) -> Result<()> {
         resolvers.to_vec()
     };
 
-    // Try resolvers in order; first success wins.
     let mut last_err: Option<anyhow::Error> = None;
     for r in resolvers {
         match query_dnskey_root(&r).await {
@@ -220,27 +227,24 @@ async fn make_trusted_key(out: &Path, resolvers: &[String]) -> Result<()> {
     Err(last_err.unwrap_or_else(|| anyhow!("falló MakeTrustAnchor por razón desconocida")))
 }
 
+// UDP -> si truncado -> TCP
 async fn query_dnskey_root(resolver: &str) -> Result<String> {
     let resolver_str = resolver.to_string();
     let sa = parse_socket_addr(resolver)
         .with_context(|| format!("resolver inválido: {resolver_str}"))?;
 
-    // 1) Intento UDP (rápido)
     match query_dnskey_with_protocol(sa, Protocol::Udp).await {
-        Ok(s) => return Ok(s),
+        Ok(s) => Ok(s),
         Err(e) => {
-            // Si vino truncado (TC=1), reintentamos por TCP.
-            let msg = format!("{e:#}");
-            if msg.to_lowercase().contains("truncated") {
-                return query_dnskey_with_protocol(sa, Protocol::Tcp).await
-                    .with_context(|| format!("fallback TCP luego de truncation usando {resolver_str}"));
+            let msg = format!("{e:#}").to_lowercase();
+            if msg.contains("truncated") || msg.contains("truncat") {
+                return query_dnskey_with_protocol(sa, Protocol::Tcp)
+                    .await
+                    .with_context(|| {
+                        format!("fallback TCP luego de truncation usando {resolver_str}")
+                    });
             }
-            // Algunos resolvers devuelven truncation como "truncated response" / "truncat"
-            if msg.to_lowercase().contains("truncat") {
-                return query_dnskey_with_protocol(sa, Protocol::Tcp).await
-                    .with_context(|| format!("fallback TCP luego de truncation usando {resolver_str}"));
-            }
-            return Err(e).with_context(|| format!("lookup DNSKEY . (UDP) usando {resolver_str}"));
+            Err(e).with_context(|| format!("lookup DNSKEY . (UDP) usando {resolver_str}"))
         }
     }
 }
@@ -256,22 +260,18 @@ async fn query_dnskey_with_protocol(sa: SocketAddr, proto: Protocol) -> Result<S
         http_endpoint: None,
     });
 
+    let cfg = ResolverConfig::from_parts(None, vec![], ns_group);
     let _opts = ResolverOpts::default();
 
-    let cfg = ResolverConfig::from_parts(None, vec![], ns_group);
+    let resolver: TokioResolver =
+        TokioResolver::builder_with_config(cfg, TokioConnectionProvider::default()).build();
 
-    let resolver: TokioResolver = TokioResolver::builder_with_config(cfg, TokioConnectionProvider::default())
-        .build();
-
-    // Query DNSKEY for root
     let name = Name::from_str(".").expect("root name");
     let resp = resolver
         .lookup(name, RecordType::DNSKEY)
         .await
         .context("lookup DNSKEY .")?;
 
-    // Output format expected by Hickory per manual:
-    // Copy the ANSWER section lines as zonefile-like lines.
     let mut out = String::new();
     for rec in resp.record_iter() {
         if rec.record_type() != RecordType::DNSKEY {
@@ -279,10 +279,8 @@ async fn query_dnskey_with_protocol(sa: SocketAddr, proto: Protocol) -> Result<S
         }
         let ttl = rec.ttl();
         let rdata = rec.data();
-        // This yields: "DNSKEY <flags> <protocol> <algorithm> <public_key>"
         let rdata_txt = format!("{rdata}");
-        out.push_str(&format!(". {ttl} IN {rdata_txt}
-"));
+        out.push_str(&format!(". {ttl} IN {rdata_txt}\n"));
     }
 
     if out.trim().is_empty() {
@@ -296,7 +294,6 @@ fn parse_socket_addr(s: &str) -> Result<SocketAddr> {
     if let Ok(sa) = s.parse::<SocketAddr>() {
         return Ok(sa);
     }
-    // If it's a bare IP, default port 53
     let ip = s
         .parse::<IpAddr>()
         .map_err(|e| anyhow!("IP inválida: {s} ({e})"))?;
@@ -305,13 +302,12 @@ fn parse_socket_addr(s: &str) -> Result<SocketAddr> {
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("creando dir {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("creando dir {}", parent.display()))?;
     }
     let tmp = path.with_extension("tmp");
     {
-        let mut f = fs::File::create(&tmp)
-            .with_context(|| format!("creando tmp {}", tmp.display()))?;
+        let mut f =
+            fs::File::create(&tmp).with_context(|| format!("creando tmp {}", tmp.display()))?;
         f.write_all(bytes).context("escribiendo tmp")?;
         f.sync_all().ok();
     }
@@ -333,46 +329,22 @@ async fn inspect_root_anchors_xml() -> Result<()> {
         .with_context(|| format!("descargando {IANA_ROOT_ANCHORS_XML_URL}"))?;
 
     if !resp.status().is_success() {
-        return Err(anyhow!("HTTP {} al descargar {}", resp.status(), IANA_ROOT_ANCHORS_XML_URL));
+        return Err(anyhow!(
+            "HTTP {} al descargar {}",
+            resp.status(),
+            IANA_ROOT_ANCHORS_XML_URL
+        ));
     }
 
     let body = resp.bytes().await.context("leyendo xml")?;
 
-    // Parse minimally: read KeyDigest elements and print some metadata.
     let mut reader = Reader::from_reader(body.as_ref());
     reader.trim_text(true);
 
     let mut buf = Vec::new();
 
-    let mut keytag: Option<String> = None;
-    let mut algorithm: Option<String> = None;
-    let mut digest_type: Option<String> = None;
-
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) => {
-                let name = e.name().as_ref().to_vec();
-                if name.as_slice() == b"KeyDigest" {
-                    keytag = None;
-                    algorithm = None;
-                    digest_type = None;
-                }
-            }
-            Ok(Event::End(e)) => {
-                let name = e.name().as_ref().to_vec();
-                if name.as_slice() == b"KeyDigest" {
-                    eprintln!(
-                        "IANA root-anchors.xml KeyDigest: keytag={:?} alg={:?} digest_type={:?}",
-                        keytag, algorithm, digest_type
-                    );
-                }
-            }
-            Ok(Event::Text(t)) => {
-                // We need last start tag to map text; simplest approach:
-                // quick-xml Reader doesn't keep it; use a small state machine with peek is more code.
-                // For now we skip deep mapping; this inspection is "best effort".
-                let _ = t;
-            }
             Ok(Event::Eof) => break,
             Err(e) => return Err(anyhow!("xml parse error: {e}")),
             _ => {}
@@ -382,3 +354,4 @@ async fn inspect_root_anchors_xml() -> Result<()> {
 
     Ok(())
 }
+
