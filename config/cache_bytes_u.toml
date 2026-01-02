@@ -1,0 +1,50 @@
+listen_udp = "0.0.0.0:1053"
+listen_tcp = "0.0.0.0:1053"
+
+upstreams = ["1.1.1.1:53", "8.8.8.8:53"]
+roots = []
+
+[zones]
+zones_dir = "zones"
+
+[filters]
+allowlist_domains = []
+blocklist_domains = []
+deny_nets = []
+allow_nets = []
+
+[cache]
+# modo A (compat): puede estar, pero se ignora si hay max_bytes
+answer_cache_size = 20000
+negative_cache_size = 20000
+
+# modo B (ACTIVA por bytes)
+answer_cache_max_bytes = 512000000
+negative_cache_max_bytes = 128000000
+
+min_ttl = 10
+max_ttl = 3600
+negative_ttl = 300
+
+prefetch_threshold_secs = 20
+stale_window_secs = 60
+
+[cache.negative]
+enabled = true
+cache_nxdomain = true
+cache_nodata = true
+two_hit = true
+probe_ttl_secs = 60
+min_ttl = 30
+max_ttl = 600
+
+[recursor]
+ns_cache_size = 1024
+record_cache_size = 2048
+recursion_limit = 10
+ns_recursion_limit = 10
+timeout_ms = 1500
+attempts = 2
+case_randomization = true
+dnssec = "off"
+

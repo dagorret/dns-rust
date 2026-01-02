@@ -1,0 +1,54 @@
+listen_udp = "0.0.0.0:1053"
+listen_tcp = "0.0.0.0:1053"
+
+# Modo FORWARDER
+upstreams = ["1.1.1.1:53", "8.8.8.8:53"]
+
+# En forwarder no se usan roots, pero el campo existe
+roots = []
+
+[zones]
+zones_dir = "zones"
+
+[filters]
+allowlist_domains = []
+blocklist_domains = []
+deny_nets = []
+allow_nets = []
+
+[cache]
+# Modo A (compat): se ignora si están los max_bytes
+answer_cache_size = 20000
+negative_cache_size = 20000
+
+# Modo B (por memoria)
+answer_cache_max_bytes = 2147483648     # 2 GiB
+negative_cache_max_bytes = 536870912    # 512 MiB
+
+min_ttl = 10
+max_ttl = 3600
+negative_ttl = 300
+
+prefetch_threshold_secs = 30
+stale_window_secs = 120
+
+[cache.negative]
+enabled = true
+cache_nxdomain = true
+cache_nodata = true
+two_hit = true
+probe_ttl_secs = 60
+min_ttl = 30
+max_ttl = 600
+
+[recursor]
+# Estos campos son requeridos por el struct aunque en forwarder no se usen
+ns_cache_size = 1024
+record_cache_size = 2048
+recursion_limit = 10
+ns_recursion_limit = 10
+timeout_ms = 1500
+attempts = 2
+case_randomization = true
+dnssec = "off"
+

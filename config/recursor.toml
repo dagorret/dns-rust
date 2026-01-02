@@ -1,0 +1,55 @@
+listen_udp = "0.0.0.0:1053"
+listen_tcp = "0.0.0.0:1053"
+
+# Para recursor iterativo: NO upstreams
+upstreams = []
+
+# Roots: al menos algunos root servers con :53
+roots = [
+  "198.41.0.4",     # a.root-servers.net
+  "199.9.14.201",   # b.root-servers.net
+  "192.33.4.12"     # c.root-servers.net
+]
+
+[zones]
+zones_dir = "zones"
+
+[filters]
+allowlist_domains = []
+blocklist_domains = []
+deny_nets = []
+allow_nets = []
+
+[cache]
+answer_cache_size = 20000
+negative_cache_size = 20000
+
+answer_cache_max_bytes = 2147483648
+negative_cache_max_bytes = 536870912
+
+min_ttl = 10
+max_ttl = 3600
+negative_ttl = 300
+
+prefetch_threshold_secs = 30
+stale_window_secs = 120
+
+[cache.negative]
+enabled = true
+cache_nxdomain = true
+cache_nodata = true
+two_hit = true
+probe_ttl_secs = 60
+min_ttl = 30
+max_ttl = 600
+
+[recursor]
+ns_cache_size = 1024
+record_cache_size = 2048
+recursion_limit = 10
+ns_recursion_limit = 10
+timeout_ms = 1500
+attempts = 2
+case_randomization = true
+dnssec = "off"
+

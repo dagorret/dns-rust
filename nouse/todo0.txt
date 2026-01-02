@@ -1,0 +1,27 @@
+Tu estrategia (prefetch + SWR + two-hit negativo) es correcta, pero para 10M QPS yo cambiaría/ajustaría:
+
+Cache por RRset (o al menos por “respuesta normalizada”) para reducir bytes repetidos.
+
+Key más compacta (hash/bytes) en lugar de String larga.
+
+Shard per-core / per-thread cache para bajar contención.
+
+Evitar allocations en hot path (reusar buffers, arena, etc.)
+
+4) Kernel / red (imprescindible)
+
+SO_REUSEPORT con múltiples sockets UDP (una por core).
+
+rmem_max/wmem_max, netdev_max_backlog, somaxconn.
+
+Afinidad CPU, IRQ affinity, NIC queues.
+
+Considerar XDP/DPDK si querés exprimir.
+
+5) Observabilidad y límites de seguridad
+
+Rate limit por IP/subred (evitar reflection/abuse).
+
+Timeouts agresivos.
+
+Circuit breaker: si upstream se cae, serví stale con límite.
