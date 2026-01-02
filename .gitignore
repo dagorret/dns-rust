@@ -27,3 +27,9 @@
 .DS_Store
 Thumbs.db
 
+# DNS bootstrap artifacts
+/etc/dnsrust/
+/etc/dnsrust/*.key
+/etc/dnsrust/*.hints
+/etc/dnsrust/.roots.tmp.toml
+

@@ -27,7 +27,17 @@ hickory-server = "0.25.2"
 hickory-resolver = "0.25.2"
 hickory-recursor = "0.25.2"
 
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
+quick-xml = "0.31"
+
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net"] }
 tempfile = "3"
 assert_cmd = "2"
+
+[[bin]]
+name = "recursor-bootstrap"
+path = "src/bin/recursor-bootstrap.rs"
+
